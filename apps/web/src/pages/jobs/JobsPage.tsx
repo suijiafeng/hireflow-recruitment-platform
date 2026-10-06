@@ -1,7 +1,7 @@
 import { AppstoreOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { JOB_STATUS_LABEL, PERMISSIONS, type JobStatus } from '@hireflow/shared';
-import { App, Button, Form, Input, InputNumber, Modal, Select, Spin, Table } from 'antd';
+import { App, Button, Form, Input, InputNumber, Select, Spin, Table } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import type { CSSProperties } from 'react';
@@ -13,6 +13,10 @@ import { RowActions } from '../../components/RowActions';
 import { ScorecardModal } from './ScorecardModal';
 import { TalentPoolDrawer } from './TalentPoolDrawer';
 import { useAuthStore } from '../../stores/auth';
+import { FormModal } from '../../components/FormModal';
+import { useUrlParams } from '../../hooks/useUrlState';
+import { pressable } from '../../utils/pressable';
+import { departmentOptions } from '../../utils/departments';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -45,10 +49,15 @@ export function JobsPage() {
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
 
-  const [page, setPage] = useState(1);
-  const [keyword, setKeyword] = useState('');
-  const [status, setStatus] = useState('');
-  const [deptId, setDeptId] = useState<string | undefined>();
+  // 搜索 / 状态 / 部门 / 页码都在网址里，刷新与后退不丢；改筛选时页码归 1，避免停在已不存在的页
+  const [params, updateParams] = useUrlParams();
+  const page = Number(params.get('page')) || 1;
+  const keyword = params.get('q') ?? '';
+  const status = params.get('status') ?? '';
+  const deptId = params.get('dept') ?? undefined;
+  const setPage = (p: number) => updateParams({ page: p === 1 ? null : p });
+  const setStatus = (v: string) => updateParams({ status: v, page: null });
+  const setDeptId = (v?: string) => updateParams({ dept: v, page: null });
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Job | null>(null);
   const [talentPoolJob, setTalentPoolJob] = useState<Job | null>(null);
@@ -118,10 +127,26 @@ export function JobsPage() {
       return;
     }
     const departmentId = form.getFieldValue('departmentId') as string | undefined;
-    generateJdMutation.mutate({
-      title,
-      departmentName: departmentsQuery.data?.find((d) => d.id === departmentId)?.name,
-      keywords: (form.getFieldValue('keywords') as string | undefined)?.trim() || undefined,
+    const run = () =>
+      generateJdMutation.mutate({
+        title,
+        departmentName: departmentsQuery.data?.find((d) => d.id === departmentId)?.name,
+        keywords: (form.getFieldValue('keywords') as string | undefined)?.trim() || undefined,
+      });
+    // 生成结果会整段替换职位描述与任职要求：已有内容时先确认，避免手写的 JD 被一键覆盖
+    const hasContent = ['description', 'requirement'].some((f) =>
+      Boolean((form.getFieldValue(f) as string | undefined)?.trim()),
+    );
+    if (!hasContent) {
+      run();
+      return;
+    }
+    modal.confirm({
+      title: '用 AI 生成的内容替换现有 JD？',
+      content: '职位描述与任职要求里已有内容，生成后将被整段替换。',
+      okText: '替换',
+      cancelText: '保留现有内容',
+      onOk: run,
     });
   };
 
@@ -278,20 +303,19 @@ export function JobsPage() {
       <div className="hf-bar">
         <div className="hf-bar-left">
           <Input.Search
+            key={keyword}
+            defaultValue={keyword}
             className="w-260"
             placeholder="搜索职位名称、部门"
             allowClear
-            onSearch={(value) => {
-              setPage(1);
-              setKeyword(value.trim());
-            }}
+            onSearch={(value) => updateParams({ q: value.trim(), page: null })}
           />
           <div className="hf-seg">
             {STATUS_FILTERS.map((f) => (
               <span
                 key={f.key || 'all'}
                 className={status === f.key ? 'hf-seg--on' : undefined}
-                onClick={() => setStatus(f.key)}
+                {...pressable(() => setStatus(f.key))}
               >
                 {f.label}
               </span>
@@ -304,7 +328,8 @@ export function JobsPage() {
             value={deptId}
             onChange={setDeptId}
             loading={departmentsQuery.isLoading}
-            options={departmentsQuery.data?.map((d) => ({ value: d.id, label: d.name }))}
+            options={departmentOptions(departmentsQuery.data)}
+                showSearch={{ optionFilterProp: 'label' }}
           />
         </div>
         <div className="hf-bar-right">
@@ -380,7 +405,7 @@ export function JobsPage() {
       <TalentPoolDrawer job={talentPoolJob} onClose={() => setTalentPoolJob(null)} />
       <ScorecardModal job={scorecardJob} onClose={() => setScorecardJob(null)} />
 
-      <Modal
+      <FormModal form={form}
         className="hf-modal"
         title={
           <>
@@ -425,7 +450,8 @@ export function JobsPage() {
               <Select
                 placeholder="选择部门"
                 loading={departmentsQuery.isLoading}
-                options={departmentsQuery.data?.map((d) => ({ value: d.id, label: d.name }))}
+                options={departmentOptions(departmentsQuery.data)}
+                showSearch={{ optionFilterProp: 'label' }}
               />
             </Form.Item>
             <Form.Item name="hiringManagerId" label="用人经理" className="u-flex-1">
@@ -468,7 +494,7 @@ export function JobsPage() {
             <Input.TextArea rows={4} placeholder="任职要求" />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
     </div>
   );
 }

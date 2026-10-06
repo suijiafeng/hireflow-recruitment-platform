@@ -9,7 +9,7 @@ import {
 import { ACTIVITY_ACTIONS, RoleCode } from '@hireflow/shared';
 import { departmentScopeOf, isAssignedScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
-import { maskEmail, maskPhone } from '../../common/mask';
+import { maskContactsDeep, maskContactsInText, maskEmail, maskPhone } from '../../common/mask';
 import type { Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { AiService } from '../ai/ai.service';
@@ -18,6 +18,22 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AddResumeDto } from './dto/add-resume.dto';
 import { CreateCandidateDto } from './dto/create-candidate.dto';
 import { QueryCandidatesDto } from './dto/query-candidates.dto';
+
+/**
+ * 「待处理新简历」：在招职位里仍停在第一阶段的在途应聘。大盘待办与候选人列表筛选共用这一个口径，
+ * 保证「点 12 看到 12」。经理视角同时收紧到本部门职位。
+ */
+export function pendingScreeningWhere(deptScope: string[] | null): Prisma.CandidateWhereInput {
+  return {
+    applications: {
+      some: {
+        status: 'ACTIVE',
+        stage: { order: 0 },
+        job: { status: 'OPEN', ...(deptScope ? { departmentId: { in: deptScope } } : {}) },
+      },
+    },
+  };
+}
 
 @Injectable()
 export class CandidatesService {
@@ -41,15 +57,29 @@ export class CandidatesService {
     );
   }
 
-  private maskContact<T extends { email?: string | null; phone?: string | null }>(
-    candidate: T,
-    user: JwtUser,
-  ): T {
+  private maskContact<
+    T extends {
+      email?: string | null;
+      phone?: string | null;
+      resumes?: Array<{ rawText: string | null; parsed: unknown; fileKey: string | null }>;
+    },
+  >(candidate: T, user: JwtUser): T {
     if (!this.shouldMaskContact(user)) return candidate;
     return {
       ...candidate,
       email: candidate.email ? maskEmail(candidate.email) : null,
       phone: candidate.phone ? maskPhone(candidate.phone) : null,
+      // 简历正文与 AI 解析结果同样打码；原件文件无法打码，对该视角隐藏（fileKey 置空，前端据此不显示「原件」）
+      ...(candidate.resumes
+        ? {
+            resumes: candidate.resumes.map((r) => ({
+              ...r,
+              rawText: r.rawText ? maskContactsInText(r.rawText) : r.rawText,
+              parsed: maskContactsDeep(r.parsed),
+              fileKey: null,
+            })),
+          }
+        : {}),
     };
   }
 
@@ -60,7 +90,7 @@ export class CandidatesService {
   private candidateScopeWhere(user: JwtUser): Prisma.CandidateWhereInput {
     const deptScope = departmentScopeOf(user);
     if (deptScope) {
-      return { applications: { some: { job: { departmentId: deptScope } } } };
+      return { applications: { some: { job: { departmentId: { in: deptScope } } } } };
     }
     if (isAssignedScope(user)) {
       return {
@@ -73,19 +103,23 @@ export class CandidatesService {
   }
 
   async list(query: QueryCandidatesDto, user: JwtUser) {
-    const { page = 1, pageSize = 20, keyword } = query;
+    const { page = 1, pageSize = 20, keyword, stage } = query;
+    // 各条件用 AND 组合：范围条件与「待初筛」都落在 applications 上，展开合并会互相覆盖
     const where: Prisma.CandidateWhereInput = {
-      ...this.candidateScopeWhere(user),
-      ...(keyword
-        ? {
-            OR: [
-              { name: { contains: keyword, mode: 'insensitive' } },
-              { email: { contains: keyword, mode: 'insensitive' } },
-              { phone: { contains: keyword } },
-              { tags: { has: keyword } },
-            ],
-          }
-        : {}),
+      AND: [
+        this.candidateScopeWhere(user),
+        keyword
+          ? {
+              OR: [
+                { name: { contains: keyword, mode: 'insensitive' } },
+                { email: { contains: keyword, mode: 'insensitive' } },
+                { phone: { contains: keyword } },
+                { tags: { has: keyword } },
+              ],
+            }
+          : {},
+        stage === 'screening' ? pendingScreeningWhere(departmentScopeOf(user)) : {},
+      ],
     };
     const [total, items] = await this.prisma.$transaction([
       this.prisma.candidate.count({ where }),
@@ -156,6 +190,8 @@ export class CandidatesService {
           include: {
             job: { select: { id: true, title: true, scorecardTemplate: true } },
             stage: { select: { id: true, name: true } },
+            // 详情里要知道这条应聘是否已有 Offer：有就给「查看 Offer」，别让 HR 填完才被告知已存在
+            offer: { select: { id: true, approvalStatus: true, decision: true } },
             interviews: {
               include: {
                 interviewers: { include: { user: { select: { id: true, name: true } } } },
@@ -325,6 +361,10 @@ export class CandidatesService {
     });
     if (!resume) throw new NotFoundException('简历不存在');
     await this.assertCandidateInScope(resume.candidateId, user);
+    // 原件 PDF/图片里的联系方式无法打码：脱敏视角（纯面试官）只能看打码后的简历正文
+    if (this.shouldMaskContact(user)) {
+      throw new ForbiddenException('简历原件含候选人联系方式，面试官视角仅可查看正文');
+    }
     if (!resume.fileKey) throw new NotFoundException('该简历为文本导入，无原件文件');
     return { url: await this.storage.presignedGetUrl(resume.fileKey, resume.fileName ?? undefined) };
   }

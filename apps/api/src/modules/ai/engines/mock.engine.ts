@@ -1,4 +1,4 @@
-import { EvaluationConclusion } from '@hireflow/shared';
+import { AI_DRAFT_MARKER, EvaluationConclusion } from '@hireflow/shared';
 import type {
   AiEngine,
   CompareInput,
@@ -177,12 +177,13 @@ export class MockAiEngine implements AiEngine {
     });
     const avg = scorecard.reduce((s, i) => s + i.score, 0) / scorecard.length;
 
+    // 1-5 分制里 3 分是「达到要求」：均分过 3 就该是推荐，否则 3/3/4 会配上「不推荐」，自相矛盾
     const conclusion =
       avg >= 4.5
         ? EvaluationConclusion.STRONG_YES
-        : avg >= 3.4
+        : avg >= 3
           ? EvaluationConclusion.YES
-          : avg >= 2.4
+          : avg >= 2
             ? EvaluationConclusion.NO
             : EvaluationConclusion.STRONG_NO;
 
@@ -190,7 +191,7 @@ export class MockAiEngine implements AiEngine {
     return {
       scorecard,
       conclusion,
-      comments: `【AI 草稿·请修改确认】第 ${input.round} 轮面试（${input.jobTitle}）记录要点：${excerpt}${input.notes.length > 80 ? '…' : ''}`,
+      comments: `${AI_DRAFT_MARKER}第 ${input.round} 轮面试（${input.jobTitle}）记录要点：${excerpt}${input.notes.length > 80 ? '…' : ''}`,
     };
   }
 

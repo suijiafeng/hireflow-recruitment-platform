@@ -5,10 +5,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ACTIVITY_ACTIONS, RoleCode } from '@hireflow/shared';
-import { departmentScopeOf, isAssignedScope } from '../../common/data-scope';
+import { ACTIVITY_ACTIONS, AI_DRAFT_MARKER, EVALUATION_CONCLUSION_LABEL, PERMISSIONS, RoleCode } from '@hireflow/shared';
+import { departmentScopeOf, inDepartmentScope, isAssignedScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
-import { candidateActor, CN_TZ_OFFSET_MS, newPortalToken } from '../../common/portal';
+import { candidateActor, CN_TZ_OFFSET_MS, formatCnDateTime, newPortalToken } from '../../common/portal';
 import type { Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { AiService } from '../ai/ai.service';
@@ -71,8 +71,8 @@ export class InterviewsService {
     await this.notifications.push(
       dto.interviewerIds,
       `新面试指派：${application.candidate.name}（第 ${dto.round} 轮）`,
-      `${application.job.title}${dto.scheduledAt ? ` · ${new Date(dto.scheduledAt).toLocaleString('zh-CN')}` : ' · 时间待定'}`,
-      '/interviews',
+      `${application.job.title}${dto.scheduledAt ? ` · ${formatCnDateTime(dto.scheduledAt)}` : ' · 时间待定'}`,
+      `/interviews?candidate=${application.candidateId}`,
     );
     return interview;
   }
@@ -164,8 +164,8 @@ export class InterviewsService {
     await this.notifications.push(
       interviewerIds,
       `面试时间已确定：${interview.application.candidate.name}（第 ${interview.round} 轮）`,
-      `${interview.application.job.title} · ${start.toLocaleString('zh-CN')}`,
-      '/interviews',
+      `${interview.application.job.title} · ${formatCnDateTime(start)}`,
+      `/interviews?candidate=${interview.application.candidateId}`,
     );
     return updated;
   }
@@ -203,8 +203,8 @@ export class InterviewsService {
     await this.notifications.push(
       interview.interviewers.map((i) => i.userId),
       `面试已取消：${interview.application.candidate.name}（第 ${interview.round} 轮）`,
-      undefined,
-      '/interviews',
+      `${interview.scheduledAt ? `原定 ${formatCnDateTime(interview.scheduledAt)} · ` : ''}由 ${user.name} 取消`,
+      `/interviews?candidate=${interview.application.candidateId}`,
     );
     return updated;
   }
@@ -231,7 +231,7 @@ export class InterviewsService {
     }
     const deptScope = user ? departmentScopeOf(user) : null;
     if (deptScope) {
-      scopeWhere.application = { job: { departmentId: deptScope } };
+      scopeWhere.application = { job: { departmentId: { in: deptScope } } };
     }
     if (applicationId) {
       return this.prisma.interview.findMany({
@@ -259,22 +259,44 @@ export class InterviewsService {
   }
 
   /**
+   * 谁可以对某场面试写面评（草稿与提交共用）：
+   * - 「仅被指派」（面试官）：只能是本场的面试官；
+   * - 「本部门」（用人经理）：仅本部门职位的面试——经理可以补录面评，但不能跨部门；
+   * - 全局范围（HR/管理员）：不受限，用于代录线下面试的结论。
+   */
+  private assertCanEvaluate(
+    interview: { interviewers: Array<{ userId: string }>; application: { job: { departmentId: string | null } } },
+    user: JwtUser,
+  ) {
+    if (isAssignedScope(user) && !interview.interviewers.some((i) => i.userId === user.sub)) {
+      throw new ForbiddenException('仅可对自己被指派的面试提交评价');
+    }
+    const deptScope = departmentScopeOf(user);
+    if (deptScope && !inDepartmentScope(deptScope, interview.application.job.departmentId)) {
+      throw new ForbiddenException('仅可评价本部门职位的面试（数据范围：本部门）');
+    }
+  }
+
+  /**
    * AI 面评草稿（面试 Copilot）：
    * 面试官的原始记录 → 结构化评分卡草稿，返回给前端预填，最终由人修改确认。
    */
-  async draftEvaluation(interviewId: string, notes: string) {
+  async draftEvaluation(interviewId: string, notes: string, user: JwtUser) {
     const interview = await this.prisma.interview.findUnique({
       where: { id: interviewId },
       include: {
+        interviewers: true,
         application: {
           include: {
             candidate: { select: { name: true } },
-            job: { select: { title: true, scorecardTemplate: true } },
+            job: { select: { title: true, scorecardTemplate: true, departmentId: true } },
           },
         },
       },
     });
     if (!interview) throw new NotFoundException('面试不存在');
+    // 草稿与正式提交同一道门：否则可对任意场次调用 AI，拿到候选人姓名与岗位并消耗额度
+    this.assertCanEvaluate(interview, user);
 
     // 岗位评分卡模板：AI 草稿按模板维度输出，与面评表单一致
     const template = interview.application.job.scorecardTemplate as
@@ -296,16 +318,28 @@ export class InterviewsService {
       where: { id: interviewId },
       include: {
         interviewers: true,
-        application: { include: { candidate: { select: { name: true } } } },
+        application: {
+          include: {
+            candidate: { select: { id: true, name: true } },
+            job: { select: { id: true, title: true, departmentId: true } },
+          },
+        },
       },
     });
     if (!interview) throw new NotFoundException('面试不存在');
     if (interview.status === 'CANCELED') {
       throw new BadRequestException('该面试已取消，不可提交评价');
     }
-    // 「仅被指派」范围的面试官只能对自己参与的场次打分；HR/管理员/用人经理按其原有数据范围不受此限
-    if (isAssignedScope(user) && !interview.interviewers.some((i) => i.userId === user.sub)) {
-      throw new ForbiddenException('仅可对自己被指派的面试提交评价');
+    this.assertCanEvaluate(interview, user);
+    const revising = Boolean(
+      await this.prisma.evaluation.findUnique({
+        where: { interviewId_interviewerId: { interviewId, interviewerId: user.sub } },
+        select: { id: true },
+      }),
+    );
+    // 草稿标记还在，说明评语没人看过：正式面评会进入 Offer 决策，不能原样落库
+    if (dto.comments?.includes(AI_DRAFT_MARKER)) {
+      throw new BadRequestException(`请核对评语并删除「${AI_DRAFT_MARKER}」标记后再提交`);
     }
 
     const evaluation = await this.prisma.evaluation.upsert({
@@ -346,6 +380,18 @@ export class InterviewsService {
         round: interview.round,
         conclusion: dto.conclusion,
       },
+    );
+    // 面评是推进下一轮 / 发 Offer 的依据：HR 与职位负责人不该靠反复刷页面才知道有反馈
+    const conclusionLabel = EVALUATION_CONCLUSION_LABEL[dto.conclusion] ?? dto.conclusion;
+    const recipients = new Set([
+      ...(await this.notifications.jobManagerIds(interview.application.job.id)),
+      ...(await this.notifications.recipientsByPermission(PERMISSIONS.INTERVIEW_SCHEDULE, interview.application.job.departmentId)),
+    ]);
+    await this.notifications.push(
+      [...recipients].filter((id) => id !== user.sub),
+      `面评${revising ? '已修订' : '已提交'}：${interview.application.candidate.name}（第 ${interview.round} 轮 · ${conclusionLabel}）`,
+      `${interview.application.job.title} · 面试官 ${user.name}`,
+      `/candidates?candidate=${interview.application.candidate.id}`,
     );
     return evaluation;
   }
@@ -420,9 +466,17 @@ export class InterviewsService {
   async selfScheduleLink(interviewId: string, user: JwtUser) {
     const interview = await this.prisma.interview.findUnique({
       where: { id: interviewId },
-      include: { application: { include: { candidate: { select: { name: true } } } } },
+      include: {
+        interviewers: true,
+        application: { include: { candidate: { select: { name: true } } } },
+      },
     });
     if (!interview) throw new NotFoundException('面试不存在');
+    const canSchedule = user.permissions.includes(PERMISSIONS.INTERVIEW_SCHEDULE);
+    const assigned = interview.interviewers.some((i) => i.userId === user.sub);
+    if (!canSchedule && !assigned) {
+      throw new ForbiddenException('仅本场面试官或招聘负责人可生成选时链接');
+    }
     if (interview.scheduledAt) throw new BadRequestException('该面试已确定时间，如需改期请先取消原时间');
 
     let token = interview.portalToken;
@@ -458,19 +512,23 @@ export class InterviewsService {
       scheduledAt: interview.scheduledAt,
       status: interview.status,
     };
-    if (interview.scheduledAt) return { ...base, slots: [] };
+    // 取消过的场次仍带着原定时间：先按状态判断，否则候选人会看到「已确认」并按时到场
+    if (interview.status === 'CANCELED' || interview.scheduledAt) return { ...base, slots: [] };
 
     const interviewerIds = interview.interviewers.map((i) => i.user.id);
     const now = new Date();
+    const durationMs = (interview.durationMins ?? 60) * 60_000;
     const slots = await this.prisma.interviewerSlot.findMany({
       where: { userId: { in: interviewerIds }, bookedBy: null, startAt: { gte: now } },
       orderBy: { startAt: 'asc' },
     });
+    // 档长短于本场面试时长的不展示：否则候选人选定后面试会溢出到下一档
+    const longEnough = slots.filter((s) => s.endAt.getTime() - s.startAt.getTime() >= durationMs);
     // 主时段取第一位面试官的空闲档；多面试官时要求其余面试官有覆盖该时间窗的空闲档
-    const primary = slots.filter((s) => s.userId === interviewerIds[0]);
+    const primary = longEnough.filter((s) => s.userId === interviewerIds[0]);
     const available = primary.filter((slot) =>
       interviewerIds.slice(1).every((uid) =>
-        slots.some((o) => o.userId === uid && o.startAt <= slot.startAt && o.endAt >= slot.endAt),
+        longEnough.some((o) => o.userId === uid && o.startAt <= slot.startAt && o.endAt >= slot.endAt),
       ),
     );
     return {
@@ -488,7 +546,9 @@ export class InterviewsService {
       where: { portalToken: token },
       include: {
         interviewers: true,
-        application: { select: { candidate: { select: { name: true } }, job: { select: { title: true } } } },
+        application: {
+          select: { candidateId: true, candidate: { select: { name: true } }, job: { select: { title: true, departmentId: true } } },
+        },
       },
     });
     if (!interview) throw new NotFoundException('链接无效或已失效，请联系 HR');
@@ -504,6 +564,19 @@ export class InterviewsService {
       throw new ConflictException('该时段刚被约走，请从剩余时段中重新选择');
     }
     const slot = await this.prisma.interviewerSlot.findUniqueOrThrow({ where: { id: slotId } });
+    // 与 HR 直接敲定同一规则：其余面试官覆盖该时间窗的空闲档一并占用，避免双约
+    if (interviewerIds.length > 1) {
+      await this.prisma.interviewerSlot.updateMany({
+        where: {
+          id: { not: slotId },
+          userId: { in: interviewerIds },
+          bookedBy: null,
+          startAt: { lte: slot.startAt },
+          endAt: { gte: slot.endAt },
+        },
+        data: { bookedBy: interview.id },
+      });
+    }
     await this.prisma.interview.update({
       where: { id: interview.id },
       data: { scheduledAt: slot.startAt, status: 'SCHEDULED' },
@@ -518,14 +591,15 @@ export class InterviewsService {
     await this.notifications.push(
       interview.interviewers.map((i) => i.userId),
       `候选人已确认面试时间：${interview.application.candidate.name}`,
-      `${interview.application.job.title} · 第 ${interview.round} 轮 · ${slot.startAt.toLocaleString('zh-CN')}`,
-      '/interviews',
+      `${interview.application.job.title} · 第 ${interview.round} 轮 · ${formatCnDateTime(slot.startAt)}`,
+      `/interviews?candidate=${interview.application.candidateId}`,
     );
-    await this.notifications.pushToRole(
-      RoleCode.HR,
+    await this.notifications.pushByPermission(
+      PERMISSIONS.INTERVIEW_SCHEDULE,
+      interview.application.job.departmentId,
       `面试时间已敲定：${interview.application.candidate.name}`,
       `${interview.application.job.title} · 第 ${interview.round} 轮`,
-      '/interviews',
+      `/interviews?candidate=${interview.application.candidateId}`,
     );
     return this.portalView(token);
   }

@@ -1,7 +1,7 @@
 import { PlusOutlined, TeamOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PERMISSIONS } from '@hireflow/shared';
-import { App, Button, Form, Input, Modal, Select, Spin, Table } from 'antd';
+import { App, Button, Form, Input, Select, Spin, Table, Tag } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import type { CSSProperties } from 'react';
@@ -12,6 +12,8 @@ import type { Candidate } from '../../api/types';
 import { CandidateDetailDrawer } from '../../components/CandidateDetailDrawer';
 import { RowActions } from '../../components/RowActions';
 import { useAuthStore } from '../../stores/auth';
+import { FormModal } from '../../components/FormModal';
+import { useDrawerParam, useUrlParams } from '../../hooks/useUrlState';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -37,16 +39,21 @@ export function CandidatesPage() {
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
 
-  const [page, setPage] = useState(1);
-  const [keyword, setKeyword] = useState('');
+  // 搜索、页码、打开的候选人都在网址里：看完详情后退、刷新、分享链接都回到同一视图
+  const [params, updateParams] = useUrlParams();
+  const page = Number(params.get('page')) || 1;
+  const keyword = params.get('q') ?? '';
+  /** 从大盘「待处理新简历」进来时带 stage=screening，只看待初筛的人 */
+  const stage = params.get('stage') === 'screening' ? ('screening' as const) : undefined;
+  const [detailId, openDetail, closeDetail] = useDrawerParam('candidate');
+  const setPage = (p: number) => updateParams({ page: p === 1 ? null : p });
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Candidate | null>(null);
-  const [detailId, setDetailId] = useState<string | null>(null);
   const [form] = Form.useForm();
 
   const candidatesQuery = useQuery({
-    queryKey: ['candidates', page, keyword],
-    queryFn: () => candidatesApi.list({ page, pageSize: PAGE_SIZE, keyword: keyword || undefined }),
+    queryKey: ['candidates', page, keyword, stage],
+    queryFn: () => candidatesApi.list({ page, pageSize: PAGE_SIZE, keyword: keyword || undefined, stage }),
   });
 
   const createMutation = useMutation({
@@ -197,7 +204,7 @@ export function CandidatesPage() {
       render: (_, c) => (
         <RowActions
           actions={[
-            { key: 'detail', label: '详情', hint: '查看候选人 360° 详情', onClick: () => setDetailId(c.id) },
+            { key: 'detail', label: '详情', hint: '查看候选人 360° 详情', onClick: () => openDetail(c.id) },
             hasPermission(PERMISSIONS.CANDIDATE_UPDATE) && {
               key: 'edit',
               label: '编辑',
@@ -236,14 +243,18 @@ export function CandidatesPage() {
       <div className="hf-bar">
         <div className="hf-bar-left">
           <Input.Search
+            key={keyword}
+            defaultValue={keyword}
             className="w-260"
             placeholder="搜索姓名、邮箱、电话、技能"
             allowClear
-            onSearch={(value) => {
-              setPage(1);
-              setKeyword(value.trim());
-            }}
+            onSearch={(value) => updateParams({ q: value.trim(), page: null })}
           />
+          {stage && (
+            <Tag closable color="blue" onClose={() => updateParams({ stage: null, page: null })}>
+              仅看待初筛
+            </Tag>
+          )}
           <span className="hf-muted">
             共 <b className="hf-td--num">{total}</b> 人
           </span>
@@ -276,10 +287,7 @@ export function CandidatesPage() {
             {keyword ? (
               <div className="hf-state-actions">
                 <Button
-                  onClick={() => {
-                    setKeyword('');
-                    setPage(1);
-                  }}
+                  onClick={() => updateParams({ q: null, page: null })}
                 >
                   清空搜索
                 </Button>
@@ -317,9 +325,9 @@ export function CandidatesPage() {
         )}
       </div>
 
-      <CandidateDetailDrawer candidateId={detailId} onClose={() => setDetailId(null)} />
+      <CandidateDetailDrawer candidateId={detailId} onClose={closeDetail} />
 
-      <Modal
+      <FormModal form={form}
         className="hf-modal"
         title={
           <>
@@ -368,7 +376,7 @@ export function CandidatesPage() {
             <Select mode="tags" placeholder="如：React、TypeScript" />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
     </div>
   );
 }

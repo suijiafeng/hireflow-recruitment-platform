@@ -1,9 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App, DatePicker, Form, InputNumber, Modal } from 'antd';
+import { App, DatePicker, Form, InputNumber } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { interviewsApi } from '../api';
 import { extractErrorMessage, isConflictError } from '../api/client';
 import type { Interview } from '../api/types';
+import { FormModal } from './FormModal';
 
 interface Props {
   /** 待定时间/改期的面试；null 时弹窗关闭 */
@@ -50,8 +51,8 @@ export function SetInterviewTimeModal({ interview, onClose }: Props) {
   });
 
   return (
-    <Modal
-      className="hf-modal"
+    <FormModal form={form}
+      className="hf-modal hf-modal--pickers"
       title={isReschedule ? '修改面试时间' : '填写面试时间'}
       open={Boolean(interview)}
       onCancel={onClose}
@@ -79,14 +80,15 @@ export function SetInterviewTimeModal({ interview, onClose }: Props) {
           <DatePicker
             showTime={{ format: 'HH:mm', minuteStep: 15 }}
             format="YYYY-MM-DD HH:mm"
-            minDate={dayjs()}
+            disabledDate={(d) => d.isBefore(dayjs(), 'day')}
             className="u-w-full"
+            getPopupContainer={() => document.body}
           />
         </Form.Item>
         <Form.Item name="durationMins" label="时长（分钟）" rules={[{ required: true }]}>
           <InputNumber min={15} max={480} step={15} className="u-w-full" />
         </Form.Item>
       </Form>
-    </Modal>
+    </FormModal>
   );
 }

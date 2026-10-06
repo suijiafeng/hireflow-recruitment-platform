@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { App, DatePicker, Form, Input, InputNumber, Modal, Select } from 'antd';
+import { App, DatePicker, Form, Input, InputNumber, Select } from 'antd';
 import type { Dayjs } from 'dayjs';
 import { interviewsApi, usersApi } from '../api';
 import { extractErrorMessage } from '../api/client';
+import dayjs from 'dayjs';
+import { FormModal } from './FormModal';
 
 interface Props {
   applicationId: string | null;
@@ -39,7 +41,7 @@ export function ScheduleInterviewModal({ applicationId, existingRounds = 0, onCl
   });
 
   return (
-    <Modal
+    <FormModal form={form}
       className="hf-modal"
       title="安排面试"
       open={Boolean(applicationId)}
@@ -72,8 +74,23 @@ export function ScheduleInterviewModal({ applicationId, existingRounds = 0, onCl
         <Form.Item name="round" label="轮次" rules={[{ required: true }]}>
           <InputNumber min={1} max={10} className="u-w-full" />
         </Form.Item>
-        <Form.Item name="scheduledAt" label="面试时间">
-          <DatePicker showTime={{ format: 'HH:mm' }} format="YYYY-MM-DD HH:mm" className="u-w-full" />
+        <Form.Item
+          name="scheduledAt"
+          label="面试时间"
+          rules={[
+            {
+              validator: (_, v?: dayjs.Dayjs) =>
+                !v || v.isAfter(dayjs()) ? Promise.resolve() : Promise.reject(new Error('面试时间不能早于现在')),
+            },
+          ]}
+        >
+          {/* 与改期弹窗一致：不能排到过去 */}
+          <DatePicker
+            showTime={{ format: 'HH:mm', minuteStep: 15 }}
+            format="YYYY-MM-DD HH:mm"
+            className="u-w-full"
+            disabledDate={(d) => d.isBefore(dayjs(), 'day')}
+          />
         </Form.Item>
         <Form.Item name="durationMins" label="时长（分钟）">
           <InputNumber min={15} max={480} step={15} className="u-w-full" />
@@ -96,6 +113,6 @@ export function ScheduleInterviewModal({ applicationId, existingRounds = 0, onCl
           <Input placeholder="https://meeting.tencent.com/..." />
         </Form.Item>
       </Form>
-    </Modal>
+    </FormModal>
   );
 }

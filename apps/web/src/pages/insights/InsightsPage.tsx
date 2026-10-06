@@ -3,12 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { Button, Select, Spin } from 'antd';
 import type { CSSProperties } from 'react';
 import dayjs from 'dayjs';
-import { useState } from 'react';
 import { analyticsApi, departmentsApi } from '../../api';
 import type { InsightsRange } from '../../api/types';
 import { SERIES } from '../../components/charts';
 import { EmptyBlock } from '../../components/ui';
 import { downloadCsv } from '../../utils/csv';
+import { useUrlState } from '../../hooks/useUrlState';
+import { pressable } from '../../utils/pressable';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -27,8 +28,10 @@ const RANGES: Array<{ key: InsightsRange; label: string }> = [
  * 口径不变：全部基于 Application 状态机事件与 ActivityLog 回放，非快照。
  */
 export function InsightsPage() {
-  const [range, setRange] = useState<InsightsRange>('quarter');
-  const [deptId, setDeptId] = useState<string | undefined>();
+  const [range, setRange] = useUrlState<InsightsRange>('range', 'quarter');
+  const [deptParam, setDeptParam] = useUrlState<string>('dept', '');
+  const deptId = deptParam || undefined;
+  const setDeptId = (v?: string) => setDeptParam(v ?? '');
 
   // range/deptId 必须进 queryKey，否则切筛选命中同一份缓存，页面看起来「切了没反应」
   const query = useQuery({
@@ -151,7 +154,7 @@ export function InsightsPage() {
         <div className="hf-bar-left">
           <div className="hf-seg">
             {RANGES.map((r) => (
-              <span key={r.key} className={range === r.key ? 'hf-seg--on' : undefined} onClick={() => setRange(r.key)}>
+              <span key={r.key} className={range === r.key ? 'hf-seg--on' : undefined} {...pressable(() => setRange(r.key))}>
                 {r.label}
               </span>
             ))}

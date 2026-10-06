@@ -17,16 +17,20 @@ import {
   type EvaluationConclusion,
   type InterviewStatus,
 } from '@hireflow/shared';
-import { App, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Spin, Typography, Upload } from 'antd';
-import dayjs from 'dayjs';
+import { Alert, App, Button, DatePicker, Drawer, Form, Input, InputNumber, Popconfirm, Select, Spin, Typography, Upload } from 'antd';
+import dayjs, { type Dayjs } from 'dayjs';
 import type { CSSProperties } from 'react';
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import { applicationsApi, boardApi, candidatesApi, jobsApi, offersApi, resumesApi } from '../api';
 import { extractErrorMessage } from '../api/client';
-import type { CandidateDetail, DetailApplication, Interview } from '../api/types';
+import type { ActivityItem, CandidateDetail, DetailApplication, Interview } from '../api/types';
 import { useAuthStore } from '../stores/auth';
 import { EvaluationModal } from './EvaluationModal';
 import { ScheduleInterviewModal } from './ScheduleInterviewModal';
+import { FormModal } from './FormModal';
+import { prepareUpload } from '../utils/prepareUpload';
+import { pressable } from '../utils/pressable';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -62,6 +66,7 @@ const ACTION_LABEL: Record<string, string> = {
   'offer.responded': '候选人答复 Offer',
   'offer.resubmitted': 'Offer 修改重提',
   'offer.extended': 'Offer 答复期续期',
+  'portal.link_rotated': '重新生成候选人链接',
   'offer.expired': 'Offer 已过期失效',
   'onboarding.created': '创建入职单',
   'onboarding.item_done': '入职待办更新',
@@ -120,7 +125,7 @@ function InterviewRow({
           <span className="hf-faint">{INTERVIEW_STATUS_LABEL[interview.status as InterviewStatus]}</span>
         )}
         {canEvaluate && evals.length === 0 && (
-          <span className="hf-link" onClick={() => onEvaluate(interview.id)}>
+          <span className="hf-link" {...pressable(() => onEvaluate(interview.id))}>
             提交面评
           </span>
         )}
@@ -168,7 +173,14 @@ function ApplicationBlock({
   scoring: boolean;
 }) {
   const hasPermission = useAuthStore((s) => s.hasPermission);
+  const navigate = useNavigate();
   const active = application.status === 'ACTIVE';
+  // 候选人拒绝 / 过期未续的 Offer 已终结，可以重新发起
+  const liveOffer =
+    application.offer && application.offer.decision !== 'DECLINED' && application.offer.approvalStatus !== 'EXPIRED'
+      ? application.offer
+      : null;
+  const prescreen = application.prescreen;
   const report = application.matchReport;
   const score = application.matchScore;
 
@@ -235,6 +247,23 @@ function ApplicationBlock({
         </div>
       )}
 
+      {prescreen && (
+        <div className={prescreen.flags.length ? 'hf-notice hf-notice--warn u-mb-8' : 'hf-notice hf-notice--flat u-mb-8'}>
+          <div className="u-flex-1">
+            <div className="hf-caption u-mb-4">
+              预筛问卷 · {dayjs(prescreen.submittedAt).format('MM-DD HH:mm')} 提交
+            </div>
+            <div className="hf-secondary">
+              期望月薪 ¥{prescreen.expectedSalary.toLocaleString()} · 最早 {prescreen.availableDate} 到岗 ·{' '}
+              {prescreen.travelOk ? '接受出差' : '不接受出差'}
+              {prescreen.note ? ` · ${prescreen.note}` : ''}
+            </div>
+            {prescreen.flags.length > 0 && (
+              <div className="hf-state--warn u-mt-4">不符项：{prescreen.flags.join('；')}</div>
+            )}
+          </div>
+        </div>
+      )}
       {application.interviews.length === 0 ? (
         <div className="hf-iv-row hf-faint">暂无面试安排</div>
       ) : (
@@ -250,23 +279,30 @@ function ApplicationBlock({
 
       <div className="hf-app-foot">
         {hasPermission(PERMISSIONS.INTERVIEW_SCHEDULE) && (
-          <span className="hf-link" onClick={() => onSchedule(application.id, application.interviews.length)}>
-            <CalendarOutlined /> 安排下一轮
+          <span className="hf-link" {...pressable(() => onSchedule(application.id, application.interviews.length))}>
+            <CalendarOutlined /> {application.interviews.length === 0 ? '安排面试' : '安排下一轮'}
           </span>
         )}
         {hasPermission(PERMISSIONS.APPLICATION_MOVE) && (
-          <span className="hf-link" onClick={() => onScore(application.id)}>
+          <span className="hf-link" {...pressable(() => onScore(application.id))}>
             <RobotOutlined /> {scoring ? '评分中…' : '重新 AI 评分'}
           </span>
         )}
-        {hasPermission(PERMISSIONS.OFFER_INITIATE) && (
-          <span className="hf-link" onClick={() => onOffer(application.id)}>
-            发起 Offer
+        {liveOffer ? (
+          // 一条应聘只能有一个在途 Offer：已有就去录用管理看进度，不再给「发起」入口
+          <span className="hf-link" {...pressable(() => navigate(`/offers?focus=${liveOffer.id}`))}>
+            查看 Offer
           </span>
+        ) : (
+          hasPermission(PERMISSIONS.OFFER_INITIATE) && (
+            <span className="hf-link" {...pressable(() => onOffer(application.id))}>
+              发起 Offer
+            </span>
+          )
         )}
         <span className="u-flex-1" />
         {hasPermission(PERMISSIONS.APPLICATION_MOVE) && (
-          <span className="hf-link hf-link--danger" onClick={() => onReject(application.id)}>
+          <span className="hf-link hf-link--danger" {...pressable(() => onReject(application.id))}>
             淘汰
           </span>
         )}
@@ -274,6 +310,15 @@ function ApplicationBlock({
     </div>
   );
 }
+
+/** 时间轴操作人：系统自动动作带上是谁的操作触发了它 */
+function actorLabel(item: ActivityItem) {
+  const name = item.actor?.name ?? item.actorName ?? '系统';
+  const trigger = item.payload?.triggeredBy;
+  return !item.actor && typeof trigger === 'string' && trigger ? `${name} · 由 ${trigger} 触发` : name;
+}
+
+type OfferFormValues = { salaryBase: number; bonusMonths?: number; startDate: Dayjs; grade?: string; note?: string };
 
 interface Props {
   candidateId: string | null;
@@ -397,8 +442,8 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
   });
 
   const offerMutation = useMutation({
-    mutationFn: (values: { salaryBase: number; bonusMonths?: number; grade?: string; note?: string }) =>
-      offersApi.create({ applicationId: offerFor!, ...values }),
+    mutationFn: ({ startDate, ...values }: OfferFormValues) =>
+      offersApi.create({ applicationId: offerFor!, ...values, startDate: startDate.format('YYYY-MM-DD') }),
     onSuccess: () => {
       message.success('Offer 已发起，等待用人经理审批（见「录用管理」）');
       setOfferFor(null);
@@ -414,6 +459,11 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
   const salaryBase = Form.useWatch('salaryBase', offerForm) as number | undefined;
   const bonusMonths = Form.useWatch('bonusMonths', offerForm) as number | undefined;
   const totalPackage = salaryBase ? salaryBase * (12 + (bonusMonths ?? 0)) : null;
+  // 发起前把面评结论摆出来：不推荐 / 没有面评时 HR 应当是有意识地继续，而不是没看到
+  const offerEvals = (detail?.applications.find((a) => a.id === offerFor)?.interviews ?? []).flatMap((iv) =>
+    iv.evaluations.filter((ev) => ev.conclusion).map((ev) => ({ ...ev, round: iv.round })),
+  );
+  const offerNegative = offerEvals.filter((ev) => ev.conclusion === 'NO' || ev.conclusion === 'STRONG_NO');
 
   return (
     <Drawer
@@ -472,7 +522,7 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                 <span
                   key={key}
                   className={tab === key ? 'hf-drawer-tab hf-drawer-tab--on' : 'hf-drawer-tab'}
-                  onClick={() => setTab(key)}
+                  {...pressable(() => setTab(key))}
                 >
                   {label}
                 </span>
@@ -522,7 +572,7 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                   <div className="hf-tl-body">
                     <div className="hf-tl-head">
                       <span className="hf-secondary hf-strong">{ACTION_LABEL[item.action] ?? item.action}</span>
-                      <span className="hf-muted">{item.actor?.name ?? item.actorName ?? '系统'}</span>
+                      <span className="hf-muted">{actorLabel(item)}</span>
                       <span className="u-flex-1" />
                       <span className="hf-faint hf-td--num">{dayjs(item.createdAt).format('MM-DD HH:mm')}</span>
                     </div>
@@ -566,18 +616,18 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                         {resume.fileKey && (
                           <span
                             className="hf-link"
-                            onClick={() =>
+                            {...pressable(() =>
                               resumesApi
                                 .fileUrl(resume.id)
                                 .then(({ url }) => window.open(url, '_blank'))
                                 .catch((error) => message.error(extractErrorMessage(error, '获取原件链接失败')))
-                            }
+                            )}
                           >
                             <PaperClipOutlined /> 原件
                           </span>
                         )}
                         {resume.rawText && hasPermission(PERMISSIONS.CANDIDATE_UPDATE) && (
-                          <span className="hf-link" onClick={() => parseMutation.mutate(resume.id)}>
+                          <span className="hf-link" {...pressable(() => parseMutation.mutate(resume.id))}>
                             <RobotOutlined /> {resume.parseStatus === 'DONE' ? '重新解析' : 'AI 解析'}
                           </span>
                         )}
@@ -617,7 +667,7 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                     <div className="hf-tl-body">
                       <div className="hf-tl-head">
                         <span className="hf-secondary hf-strong">{ACTION_LABEL[item.action] ?? item.action}</span>
-                        <span className="hf-muted">{item.actor?.name ?? item.actorName ?? '系统'}</span>
+                        <span className="hf-muted">{actorLabel(item)}</span>
                         <span className="u-flex-1" />
                         <span className="hf-faint hf-td--num">{dayjs(item.createdAt).format('MM-DD HH:mm')}</span>
                       </div>
@@ -634,7 +684,7 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
           )}
 
           {/* ---------- 弹窗 ---------- */}
-          <Modal
+          <FormModal form={resumeForm}
             className="hf-modal"
             title="导入简历"
             open={resumeOpen}
@@ -653,8 +703,16 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
             <Upload.Dragger
               accept=".pdf,.txt,.md"
               maxCount={1}
+              // 受控文件列表 + 上传前处理（大图压缩、超限拦截）：列表里显示的就是实际要传的文件
+              fileList={resumeFile ? [{ uid: 'picked', name: resumeFile.name, status: 'done' as const }] : []}
               beforeUpload={(file) => {
-                setResumeFile(file as unknown as File);
+                void prepareUpload(file as unknown as File).then((r) => {
+                  if (r.ok) setResumeFile(r.file);
+                  else {
+                    setResumeFile(null);
+                    message.error(r.reason);
+                  }
+                });
                 return false;
               }}
               onRemove={() => setResumeFile(null)}
@@ -675,9 +733,9 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                 <Input.TextArea rows={6} placeholder="与文件上传二选一" disabled={Boolean(resumeFile)} />
               </Form.Item>
             </Form>
-          </Modal>
+          </FormModal>
 
-          <Modal
+          <FormModal form={applyForm}
             className="hf-modal"
             title="加入职位流程"
             open={applyOpen}
@@ -698,9 +756,9 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                 />
               </Form.Item>
             </Form>
-          </Modal>
+          </FormModal>
 
-          <Modal
+          <FormModal form={offerForm}
             className="hf-modal"
             title={
               <>
@@ -726,8 +784,24 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
               form={offerForm}
               layout="vertical"
               initialValues={{ bonusMonths: 3 }}
-              onFinish={(values) => offerMutation.mutate(values)}
+              onFinish={(values: OfferFormValues) => offerMutation.mutate(values)}
             >
+              {offerEvals.length === 0 ? (
+                <Alert type="warning" showIcon className="u-mb-16" title="该候选人还没有任何面评" />
+              ) : offerNegative.length > 0 ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  className="u-mb-16"
+                  title={`有 ${offerNegative.length} 份面评结论为不推荐`}
+                  description={offerNegative
+                    .map(
+                      (ev) =>
+                        `第 ${ev.round} 轮 · ${ev.interviewer.name}：${EVALUATION_CONCLUSION_LABEL[ev.conclusion as EvaluationConclusion]}`,
+                    )
+                    .join('；')}
+                />
+              ) : null}
               <div className="u-flex-gap-12">
                 <Form.Item
                   name="salaryBase"
@@ -744,6 +818,18 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                   <Input placeholder="P6" maxLength={20} />
                 </Form.Item>
               </div>
+              <Form.Item
+                name="startDate"
+                label="预计入职日期"
+                rules={[{ required: true, message: '请选择预计入职日期' }]}
+                extra="会写入 Offer 与劳动合同，候选人在门户里可见"
+              >
+                <DatePicker
+                  className="w-160"
+                  disabledDate={(d) => d.isBefore(dayjs(), 'day')}
+                  placeholder="选择日期"
+                />
+              </Form.Item>
               {/* 年度总包自动计算，避免审批人自己乘 */}
               <div className="hf-notice hf-notice--flat u-mb-16">
                 <span className="u-flex-1">年度总包（自动计算）</span>
@@ -753,9 +839,9 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                 <Input.TextArea rows={2} maxLength={500} placeholder="如：竞品有同级别 Offer，建议按带宽上限给" />
               </Form.Item>
             </Form>
-          </Modal>
+          </FormModal>
 
-          <Modal
+          <FormModal form={rejectForm}
             className="hf-modal"
             title={
               <>
@@ -787,7 +873,7 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                 <Input.TextArea rows={2} maxLength={300} />
               </Form.Item>
             </Form>
-          </Modal>
+          </FormModal>
 
           <ScheduleInterviewModal
             applicationId={scheduleFor?.id ?? null}

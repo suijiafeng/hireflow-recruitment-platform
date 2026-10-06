@@ -46,8 +46,8 @@ export class InterviewsController {
   @Post(':id/evaluation-draft')
   @RequirePermissions(PERMISSIONS.EVALUATION_SUBMIT)
   @ApiOperation({ summary: 'AI 生成面评草稿（不落库，供表单预填后人工确认）' })
-  draftEvaluation(@Param('id') id: string, @Body() dto: DraftEvaluationDto) {
-    return this.interviewsService.draftEvaluation(id, dto.notes);
+  draftEvaluation(@Param('id') id: string, @Body() dto: DraftEvaluationDto, @CurrentUser() user: JwtUser) {
+    return this.interviewsService.draftEvaluation(id, dto.notes, user);
   }
 
   @Post(':id/evaluations')
@@ -62,8 +62,8 @@ export class InterviewsController {
   }
 
   @Post(':id/self-schedule-link')
-  @RequirePermissions(PERMISSIONS.INTERVIEW_SCHEDULE)
-  @ApiOperation({ summary: '生成候选人自助选时链接（未定时间的面试）' })
+  @RequirePermissions(PERMISSIONS.EVALUATION_READ)
+  @ApiOperation({ summary: '生成候选人自助选时链接（未定时间的面试；本场面试官也可发）' })
   selfScheduleLink(@Param('id') id: string, @CurrentUser() user: JwtUser) {
     return this.interviewsService.selfScheduleLink(id, user);
   }

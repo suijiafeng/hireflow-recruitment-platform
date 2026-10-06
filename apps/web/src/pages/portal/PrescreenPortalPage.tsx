@@ -6,6 +6,7 @@ import { useParams } from 'react-router';
 import { portalApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import { PortalShell } from './InterviewPortalPage';
+import { pressable } from '../../utils/pressable';
 
 /** 单选题：卡片式选项，取代 Radio.Group（移动端点击区更大） */
 function OptionPicker<T extends string | number | boolean>({
@@ -22,7 +23,7 @@ function OptionPicker<T extends string | number | boolean>({
       {options.map((o) => {
         const on = value === o.value;
         return (
-          <div key={String(o.value)} className={on ? 'hf-opt hf-opt--on' : 'hf-opt'} onClick={() => onChange?.(o.value)}>
+          <div key={String(o.value)} className={on ? 'hf-opt hf-opt--on' : 'hf-opt'} {...pressable(() => onChange?.(o.value))}>
             <span className="hf-opt-mark">{on ? <CheckOutlined /> : null}</span>
             <span>{o.label}</span>
           </div>
@@ -85,6 +86,18 @@ export function PrescreenPortalPage() {
           title="无法打开该链接"
           subTitle={extractErrorMessage(viewQuery.error, '请联系 HR 获取最新链接')}
         />
+      </PortalShell>
+    );
+
+  if (view.closed && !view.prescreen)
+    return (
+      <PortalShell title="本次应聘已结束" desc="感谢您的关注，问卷不再需要填写。如有疑问请联系 HR。" company={view.company}>
+        <div className="hf-portal-done">
+          <span className="hf-portal-done-mark">
+            <CheckOutlined />
+          </span>
+          <div className="hf-secondary">{view.jobTitle}</div>
+        </div>
       </PortalShell>
     );
 

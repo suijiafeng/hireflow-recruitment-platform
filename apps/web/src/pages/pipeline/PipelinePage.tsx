@@ -15,6 +15,7 @@ import {
   AppstoreOutlined,
   CheckSquareOutlined,
   ClockCircleOutlined,
+  SwapOutlined,
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
@@ -28,6 +29,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Dropdown,
   Form,
   Input,
   Modal,
@@ -47,8 +49,11 @@ import { applicationsApi, boardApi, candidatesApi, jobsApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import type { BatchResult, BoardCard, BoardData, CompareData } from '../../api/types';
 import { CandidateDetailDrawer } from '../../components/CandidateDetailDrawer';
+import { useDrawerParam } from '../../hooks/useUrlState';
 import { useAuthStore } from '../../stores/auth';
 import { pickDefaultJobId } from '../../utils/jobs';
+import { FormModal } from '../../components/FormModal';
+import { pressable } from '../../utils/pressable';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -110,6 +115,19 @@ function CardView({ card, overlay = false }: { card: BoardCard; overlay?: boolea
         )}
       </div>
       <div className="kanban-card-meta">{meta}</div>
+      {card.prescreen && (
+        <Tooltip
+          title={
+            card.prescreen.flags.length
+              ? card.prescreen.flags.join('；')
+              : `期望 ¥${card.prescreen.expectedSalary.toLocaleString()} · ${card.prescreen.availableDate} 可到岗`
+          }
+        >
+          <span className={card.prescreen.flags.length ? 'hf-tag hf-tag--warn' : 'hf-tag hf-tag--ok'}>
+            {card.prescreen.flags.length ? `预筛 ${card.prescreen.flags.length} 项不符` : '预筛符合'}
+          </span>
+        </Tooltip>
+      )}
       {/* 看板只会出现 ACTIVE 与 HIRED 两种卡；终态卡片不参与流转，也不再算停留时长 */}
       {card.status !== 'ACTIVE' && <div className="kanban-card-meta">已入职 · 流程已完成</div>}
       {card.status === 'ACTIVE' && days > STAGE_STAY_SLA.warnDays && (
@@ -122,14 +140,33 @@ function CardView({ card, overlay = false }: { card: BoardCard; overlay?: boolea
   );
 }
 
+/** 由业务事件自动流转、不能直接拖入的阶段（后端同样拒绝）：拖动时置灰并说明原因 */
+const AUTO_ONLY_STAGES: Record<string, string> = {
+  待入职: '候选人接受 Offer 后自动进入',
+  已入职: '入职流程闭环后自动进入',
+};
+
+type StageRef = { id: string; name: string; order: number };
+
+/** 卡片从 from 移到 to 是否被禁止；返回原因或 null（回退不受限，走填写原因流程） */
+function blockedMove(from: StageRef | undefined, to: StageRef): string | null {
+  if (!from || to.id === from.id) return null;
+  if (to.order > from.order && AUTO_ONLY_STAGES[to.name]) return AUTO_ONLY_STAGES[to.name];
+  return null;
+}
+
 function DraggableCard({
   card,
   disabled,
   onOpen,
+  stages,
+  onMoveTo,
 }: {
   card: BoardCard;
   disabled: boolean;
   onOpen: (candidateId: string) => void;
+  stages: StageRef[];
+  onMoveTo: (card: BoardCard, stageId: string) => void;
 }) {
   // 已入职是终态：卡片留在末列可见，但后端拒绝再流转（moveStage 只放行 ACTIVE），所以这里也不给拖
   const locked = disabled || card.status !== 'ACTIVE';
@@ -137,6 +174,7 @@ function DraggableCard({
   const cls = ['drag-source', locked ? 'drag-source--readonly' : '', isDragging ? 'drag-source--dragging' : '']
     .filter(Boolean)
     .join(' ');
+  const current = stages.find((st) => st.id === card.stageId);
   return (
     <div
       ref={setNodeRef}
@@ -145,9 +183,57 @@ function DraggableCard({
       onClick={() => {
         if (!isDragging) onOpen(card.candidate.id);
       }}
+      // 卡片可 Tab 聚焦（dnd-kit 已给 tabIndex），Enter 打开详情
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(card.candidate.id);
+      }}
       className={cls}
     >
       <CardView card={card} />
+      {/* 拖拽之外的移动方式：键盘 / 触控板用户也能流转；与拖拽走同一套校验（回退填原因、自动阶段不可直接进） */}
+      {!locked && (
+        // 下拉菜单渲染在 portal 里，但 React 事件仍沿组件树冒泡回卡片：
+        // 不在这里截住，菜单项上的按下会被卡片的拖拽监听接管、点击被吞，真实鼠标点了没反应
+        <span
+          className="kanban-card-move-wrap"
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: stages
+              .filter((st) => st.id !== card.stageId)
+              .map((st) => {
+                const blocked = blockedMove(current, st);
+                return {
+                  key: st.id,
+                  label: blocked ? `${st.name}（${blocked}）` : st.name,
+                  disabled: Boolean(blocked),
+                };
+              }),
+            onClick: ({ key, domEvent }) => {
+              domEvent.stopPropagation();
+              onMoveTo(card, key);
+            },
+          }}
+        >
+          <button
+            type="button"
+            className="kanban-card-move"
+            aria-label={`移动「${card.candidate.name}」到其他阶段`}
+            title="移动到…"
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <SwapOutlined />
+          </button>
+        </Dropdown>
+        </span>
+      )}
     </div>
   );
 }
@@ -162,7 +248,7 @@ function SelectableCard({
   onToggle: (id: string) => void;
 }) {
   return (
-    <div onClick={() => onToggle(card.id)} className="select-card">
+    <div {...pressable(() => onToggle(card.id))} className="select-card">
       <div className="select-card-check">
         <Checkbox checked={checked} onChange={() => onToggle(card.id)} onClick={(e) => e.stopPropagation()} />
       </div>
@@ -183,8 +269,15 @@ function BoardColumnView({
   selected,
   onToggle,
   onToggleColumn,
+  blockedReason,
+  stages,
+  onMoveTo,
 }: {
   stage: { id: string; name: string };
+  /** 正在拖的卡片不能放进本列时的原因；拖动期间置灰并提示 */
+  blockedReason: string | null;
+  stages: StageRef[];
+  onMoveTo: (card: BoardCard, stageId: string) => void;
   cards: BoardCard[];
   maxCount: number;
   dragDisabled: boolean;
@@ -194,14 +287,20 @@ function BoardColumnView({
   onToggle: (id: string) => void;
   onToggleColumn: (ids: string[], select: boolean) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: stage.id, disabled: batchMode });
+  const { setNodeRef, isOver } = useDroppable({ id: stage.id, disabled: batchMode || Boolean(blockedReason) });
   // 批量操作只对在途卡片有意义：已入职是终态，后端的批量移动/淘汰都会拒绝它
   const actionable = cards.filter((c) => c.status === 'ACTIVE');
   const selectedInColumn = cards.filter((c) => selected.has(c.id)).length;
   const overdue = cards.filter((c) => c.status === 'ACTIVE' && isOverdue(c)).length;
   const pct = maxCount > 0 ? Math.round((cards.length / maxCount) * 100) : 0;
   return (
-    <div ref={setNodeRef} className={isOver ? 'kanban-col kanban-col--over' : 'kanban-col'}>
+    <div
+      ref={setNodeRef}
+      className={['kanban-col', isOver ? 'kanban-col--over' : '', blockedReason ? 'kanban-col--blocked' : '']
+        .filter(Boolean)
+        .join(' ')}
+    >
+      {blockedReason && <div className="kanban-col-blocked-hint">不能直接拖入：{blockedReason}</div>}
       <div className="kanban-col-head">
         <div className="kanban-col-headrow">
           {batchMode && actionable.length > 0 && (
@@ -230,7 +329,14 @@ function BoardColumnView({
           batchMode && card.status === 'ACTIVE' ? (
             <SelectableCard key={card.id} card={card} checked={selected.has(card.id)} onToggle={onToggle} />
           ) : (
-            <DraggableCard key={card.id} card={card} disabled={dragDisabled || batchMode} onOpen={onOpen} />
+            <DraggableCard
+              key={card.id}
+              card={card}
+              disabled={dragDisabled || batchMode}
+              onOpen={onOpen}
+              stages={stages}
+              onMoveTo={onMoveTo}
+            />
           ),
         )}
         {cards.length === 0 && <div className="kanban-col-empty">拖拽候选人到此阶段</div>}
@@ -362,7 +468,7 @@ export function PipelinePage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [searchParams, setSearchParams] = useSearchParams();
   const jobId = searchParams.get('jobId') ?? '';
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detailId, openDetail, closeDetail] = useDrawerParam('candidate');
   const [activeCard, setActiveCard] = useState<BoardCard | null>(null);
   const [pendingRevert, setPendingRevert] = useState<PendingMove | null>(null);
   const [revertForm] = Form.useForm();
@@ -398,7 +504,14 @@ export function PipelinePage() {
   });
 
   const moveMutation = useMutation({
-    mutationFn: (vars: { applicationId: string; stageId: string; reason?: string; expectedVersion?: number }) =>
+    mutationFn: (vars: {
+      applicationId: string;
+      stageId: string;
+      reason?: string;
+      expectedVersion?: number;
+      /** 向前移动时携带，用于成功提示里的「撤销」 */
+      undo?: { fromStageId: string; fromStageName: string; toStageName: string };
+    }) =>
       boardApi.moveCard(vars.applicationId, {
         stageId: vars.stageId,
         reason: vars.reason,
@@ -420,6 +533,37 @@ export function PipelinePage() {
       } else {
         message.error(extractErrorMessage(error, '移动卡片失败'));
       }
+    },
+    onSuccess: (updated, vars) => {
+      // 回退（带原因）不再给撤销；向前移动给 6 秒撤销窗口，拖错了不必去写「回退原因」
+      if (vars.reason || !vars.undo) return;
+      const { fromStageId, fromStageName, toStageName } = vars.undo;
+      const key = `move-${vars.applicationId}`;
+      message.open({
+        key,
+        type: 'success',
+        duration: 6,
+        content: (
+          <span>
+            已移至「{toStageName}」
+            <a
+              className="u-ml-8"
+              onClick={() => {
+                message.destroy(key);
+                moveMutation.mutate({
+                  applicationId: vars.applicationId,
+                  stageId: fromStageId,
+                  // 后端规定回退必须留痕：撤销自动带上原因，审计里看得到这是一次即时撤回
+                  reason: `撤销误操作：从「${toStageName}」撤回「${fromStageName}」`,
+                  expectedVersion: updated.version,
+                });
+              }}
+            >
+              撤销
+            </a>
+          </span>
+        ),
+      });
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['board', jobId] }),
   });
@@ -513,10 +657,14 @@ export function PipelinePage() {
   );
   const addOptions = (addCandidatesQuery.data?.items ?? [])
     .filter((c) => !inFlowIds.has(c.id))
-    .map((c) => ({
-      value: c.id,
-      label: `${c.name}${c.source ? ` · ${c.source}` : ''}${c.tags.length ? ` · ${c.tags.slice(0, 3).join('/')}` : ''}`,
-    }));
+    .map((c) => {
+      // 同名候选人很常见：第二行给联系方式与录入日期，才分得清是哪一位
+      const contact = c.email || (c.phone ? `尾号 ${c.phone.slice(-4)}` : '');
+      const meta = [contact, c.source, c.tags.slice(0, 3).join('/'), `${dayjs(c.createdAt).format('YYYY-MM-DD')} 录入`]
+        .filter(Boolean)
+        .join(' · ');
+      return { value: c.id, label: c.name, meta };
+    });
 
   const addMutation = useMutation({
     mutationFn: (values: { candidateId: string }) =>
@@ -577,15 +725,24 @@ export function PipelinePage() {
   const onDragEnd = (event: DragEndEvent) => {
     setActiveCard(null);
     const { active, over } = event;
-    if (!over || !boardQuery.data) return;
-    const applicationId = String(active.id);
-    const targetStageId = String(over.id);
-    const card = findCard(applicationId);
-    if (!card || card.stageId === targetStageId) return;
+    if (!over) return;
+    const card = findCard(String(active.id));
+    if (card) requestMove(card, String(over.id));
+  };
 
+  /** 拖拽与「移动到…」菜单共用：自动阶段拦截 → 回退填原因 → 向前直接移动（带撤销） */
+  const requestMove = (card: BoardCard, targetStageId: string) => {
+    if (!boardQuery.data || card.stageId === targetStageId) return;
+    const applicationId = card.id;
     const fromCol = boardQuery.data.columns.find((c) => c.stage.id === card.stageId);
     const toCol = boardQuery.data.columns.find((c) => c.stage.id === targetStageId);
     if (!fromCol || !toCol) return;
+
+    const blocked = blockedMove(fromCol.stage, toCol.stage);
+    if (blocked) {
+      message.info(`「${toCol.stage.name}」${blocked}，不能手动移入`);
+      return;
+    }
 
     // 受控回退：向后拖必须填写原因
     if (toCol.stage.order < fromCol.stage.order) {
@@ -599,7 +756,12 @@ export function PipelinePage() {
       });
       return;
     }
-    moveMutation.mutate({ applicationId, stageId: targetStageId, expectedVersion: card.version });
+    moveMutation.mutate({
+      applicationId,
+      stageId: targetStageId,
+      expectedVersion: card.version,
+      undo: { fromStageId: fromCol.stage.id, fromStageName: fromCol.stage.name, toStageName: toCol.stage.name },
+    });
   };
 
   // 控制栏概览：总在流程人数 / 本周新增 / 超 SLA 停留
@@ -792,11 +954,21 @@ export function PipelinePage() {
                   cards={column.applications}
                   maxCount={maxCount}
                   dragDisabled={!canMove || batchMode}
-                  onOpen={setDetailId}
+                  onOpen={openDetail}
                   batchMode={batchMode}
                   selected={selected}
                   onToggle={toggleSelected}
                   onToggleColumn={toggleColumn}
+                  stages={boardQuery.data!.columns.map((c) => c.stage)}
+                  onMoveTo={requestMove}
+                  blockedReason={
+                    activeCard
+                      ? blockedMove(
+                          boardQuery.data!.columns.find((c) => c.stage.id === activeCard.stageId)?.stage,
+                          column.stage,
+                        )
+                      : null
+                  }
                 />
               ))}
             </div>
@@ -812,7 +984,7 @@ export function PipelinePage() {
         )}
       </Card>
 
-      <Modal
+      <FormModal form={revertForm}
         className="hf-modal"
         title="回退阶段需填写原因"
         open={Boolean(pendingRevert)}
@@ -855,10 +1027,10 @@ export function PipelinePage() {
             <Input.TextArea rows={3} placeholder="如：二面评价存在分歧，需重新安排一面补充考察" />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
 
       {/* 批量淘汰：破坏性操作显示影响人数 */}
-      <Modal
+      <FormModal form={batchRejectForm}
         className="hf-modal"
         title={`批量淘汰 ${selected.size} 人`}
         open={batchRejectOpen}
@@ -888,10 +1060,10 @@ export function PipelinePage() {
             <Input.TextArea rows={2} maxLength={300} placeholder="如：本批次为简历初筛不匹配" />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
 
       {/* 批量移动：目标阶段 + 可选回退原因（批量含回退卡时后端逐条校验） */}
-      <Modal
+      <FormModal form={batchMoveForm}
         className="hf-modal"
         title={`批量移动 ${selected.size} 人`}
         open={batchMoveOpen}
@@ -912,10 +1084,10 @@ export function PipelinePage() {
             <Input.TextArea rows={2} maxLength={200} placeholder="如：批量回退重新安排一面" />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
 
       {/* 添加候选人：从候选人库挑一个加进本职位流程 */}
-      <Modal
+      <FormModal form={addForm}
         className="hf-modal"
         title={
           <>
@@ -957,17 +1129,23 @@ export function PipelinePage() {
               loading={addCandidatesQuery.isFetching}
               onSearch={setAddKeyword}
               options={addOptions}
+              optionRender={(o) => (
+                <div>
+                  <div>{o.data.label}</div>
+                  <div className="hf-faint">{o.data.meta}</div>
+                </div>
+              )}
               notFoundContent={
                 addCandidatesQuery.isFetching ? <Spin size="small" /> : <span className="hf-faint">没有可加入的候选人</span>
               }
             />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
 
       <CompareModal data={compareData} loading={compareMutation.isPending} onClose={() => setCompareData(null)} />
 
-      <CandidateDetailDrawer candidateId={detailId} onClose={() => setDetailId(null)} />
+      <CandidateDetailDrawer candidateId={detailId} onClose={closeDetail} />
     </div>
   );
 }

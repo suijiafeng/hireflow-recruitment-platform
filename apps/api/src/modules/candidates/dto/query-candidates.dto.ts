@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class QueryCandidatesDto {
   @ApiPropertyOptional({ default: 1 })
@@ -19,4 +19,9 @@ export class QueryCandidatesDto {
   @IsOptional()
   @IsString()
   keyword?: string;
+
+  @ApiPropertyOptional({ enum: ['screening'], description: 'screening = 仍在招职位「第一阶段」待初筛（与大盘待办同口径）' })
+  @IsOptional()
+  @IsIn(['screening'])
+  stage?: 'screening';
 }

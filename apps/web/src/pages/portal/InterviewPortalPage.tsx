@@ -7,7 +7,9 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { useParams } from 'react-router';
 import { portalApi } from '../../api';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { extractErrorMessage } from '../../api/client';
+import { pressable } from '../../utils/pressable';
 
 /**
  * 免登录 H5 外壳：深色品牌头 + 单列滚动内容 + 固定底部主操作。
@@ -26,6 +28,8 @@ export function PortalShell({
   children: ReactNode;
   footer?: ReactNode;
 }) {
+  // 候选人看到的是公司名，不是内部系统名「智能招聘平台」
+  useDocumentTitle(typeof title === 'string' ? `${title} · ${company}` : company);
   return (
     <div className="hf-portal">
       <div className="hf-portal-head">
@@ -95,6 +99,18 @@ export function InterviewPortalPage() {
           title="无法打开该链接"
           subTitle={extractErrorMessage(viewQuery.error, '请联系 HR 获取最新链接')}
         />
+      </PortalShell>
+    );
+
+  if (view.status === 'CANCELED')
+    return (
+      <PortalShell title="本场面试已取消" desc="HR 会另行与您联系安排时间，原定时间请勿到场。">
+        <div className="hf-portal-done">
+          <div className="hf-secondary">
+            {view.jobTitle} · 第 {view.round} 轮
+            {view.scheduledAt ? ` · 原定 ${dayjs(view.scheduledAt).format('MM-DD HH:mm')}` : ''}
+          </div>
+        </div>
       </PortalShell>
     );
 
@@ -184,7 +200,7 @@ export function InterviewPortalPage() {
               const endLabel = end.isSame(start, 'day') ? end.format('HH:mm') : end.format('MM-DD HH:mm');
               const on = slotId === s.id;
               return (
-                <div key={s.id} className={on ? 'hf-opt hf-opt--on' : 'hf-opt'} onClick={() => setSlotId(s.id)}>
+                <div key={s.id} className={on ? 'hf-opt hf-opt--on' : 'hf-opt'} {...pressable(() => setSlotId(s.id))}>
                   <span className="hf-opt-mark">{on ? <CheckOutlined /> : null}</span>
                   <span className="hf-td--num">
                     {start.format('HH:mm')} – {endLabel}

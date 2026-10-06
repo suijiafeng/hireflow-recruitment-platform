@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClockCircleOutlined, CloseOutlined, PlusOutlined, ScheduleOutlined } from '@ant-design/icons';
 import { EVALUATION_CONCLUSION_LABEL, PERMISSIONS, type EvaluationConclusion } from '@hireflow/shared';
-import { App, Button, DatePicker, Form, Modal, Popconfirm, Select, Spin, Table, Tooltip, Typography } from 'antd';
+import { App, Button, DatePicker, Form, Popconfirm, Select, Spin, Table, Tooltip, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useState } from 'react';
@@ -9,11 +9,14 @@ import { interviewsApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import type { Interview, InterviewerSlot } from '../../api/types';
 import { CandidateDetailDrawer } from '../../components/CandidateDetailDrawer';
+import { useDrawerParam, useUrlState } from '../../hooks/useUrlState';
 import { EvaluationModal } from '../../components/EvaluationModal';
 import { RowActions } from '../../components/RowActions';
 import { SetInterviewTimeModal } from '../../components/SetInterviewTimeModal';
 import { useSyncedTableScroll } from '../../hooks/useSyncedTableScroll';
 import { useAuthStore } from '../../stores/auth';
+import { FormModal } from '../../components/FormModal';
+import { pressable } from '../../utils/pressable';
 
 /** 15 分钟一档的全天时间选项 */
 const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
@@ -65,9 +68,12 @@ function SlotRow({
         >
           <span
             className={slot.bookedCandidateId ? 'hf-slot-badge hf-slot-badge--link' : 'hf-slot-badge'}
-            onClick={() => slot.bookedCandidateId && onOpenBooked(slot.bookedCandidateId)}
+            {...pressable(() => slot.bookedCandidateId && onOpenBooked(slot.bookedCandidateId))}
           >
-            {slot.bookedCandidateId ? `${slot.bookedLabel} 已约` : '已约（面试已失效）'}
+            <span className="hf-ellipsis">
+              {slot.bookedCandidateId ? (slot.bookedLabel ?? '已预约') : '面试已失效'}
+            </span>
+            <span>已约</span>
           </span>
         </Tooltip>
       ) : (
@@ -150,10 +156,11 @@ function SlotsRail({ onOpenCandidate }: { onOpenCandidate: (candidateId: string)
   const overlapsExisting = (start: Dayjs, end: Dayjs) =>
     all.some((s) => dayjs(s.startAt).isBefore(end) && dayjs(s.endAt).isAfter(start));
 
-  const isToday = (pickedDates ?? []).some((d) => d.isSame(now, 'day'));
-  const startOptions = TIME_OPTIONS.filter(
-    (t) => !isToday || t.value > now.format('HH:mm'),
-  );
+  // 只有「所选全是今天」才藏过去的钟点；混选今天+以后时仍给出全天选项，
+  // 提交时再跳过已过的那几天，避免把明天上午也一起禁掉。
+  const onlyToday = Boolean(pickedDates?.length && pickedDates.every((d) => d.isSame(now, 'day')));
+  const startOptions = TIME_OPTIONS.filter((t) => !onlyToday || t.value > now.format('HH:mm'));
+  const popupContainer = () => document.body;
 
   return (
     <div className="hf-panel hf-panel--grow">
@@ -167,7 +174,7 @@ function SlotsRail({ onOpenCandidate }: { onOpenCandidate: (candidateId: string)
           必须包一个 span 让整句作为单个 flex item 正常流动 */}
       <div className="hf-notice hf-notice--flat">
         <span>
-          候选人自助选时链接只会展示<b>未被预约</b>的档期。
+          候选人自助选时只会展示<b>未被预约</b>的档期。待安排的面试点「选时」即可把链接发给对方。
         </span>
       </div>
       <div className="hf-panel-body">
@@ -211,8 +218,8 @@ function SlotsRail({ onOpenCandidate }: { onOpenCandidate: (candidateId: string)
         )}
       </div>
 
-      <Modal
-        className="hf-modal"
+      <FormModal form={form}
+        className="hf-modal hf-modal--pickers"
         title="添加可约时段"
         open={addOpen}
         onCancel={() => setAddOpen(false)}
@@ -223,6 +230,7 @@ function SlotsRail({ onOpenCandidate }: { onOpenCandidate: (candidateId: string)
         <Form
           form={form}
           layout="vertical"
+          initialValues={{ startTime: '10:00', endTime: '11:00' }}
           onFinish={(v) => {
             const [h1, m1] = v.startTime.split(':').map(Number);
             const [h2, m2] = v.endTime.split(':').map(Number);
@@ -233,21 +241,35 @@ function SlotsRail({ onOpenCandidate }: { onOpenCandidate: (candidateId: string)
                   d.hour(h2).minute(m2).second(0).millisecond(0),
                 ] as [Dayjs, Dayjs],
             );
-            const clash = ranges.filter(([a, b]) => overlapsExisting(a, b));
+            const upcoming = ranges.filter(([a]) => a.isAfter(now));
+            if (upcoming.length === 0) {
+              message.error('所选时段已过，请换个时间');
+              return;
+            }
+            const clash = upcoming.filter(([a, b]) => overlapsExisting(a, b));
             if (clash.length > 0) {
               message.error(`${clash.map(([a]) => a.format('MM-DD')).join('、')} 与已有时段重叠`);
               return;
             }
-            addMutation.mutate(ranges);
+            if (upcoming.length < ranges.length) {
+              message.warning(`已跳过 ${ranges.length - upcoming.length} 个已过时段`);
+            }
+            addMutation.mutate(upcoming);
           }}
         >
           <Form.Item
             name="dates"
             label="日期"
-            extra="可多选，一次为多天添加同一时间段"
+            extra="可多选，一次为多天添加同一时间段。档长建议与面试时长一致（默认 60 分钟）。"
             rules={[{ required: true, message: '请选择日期' }]}
           >
-            <DatePicker multiple minDate={dayjs()} maxTagCount="responsive" className="u-w-full" />
+            <DatePicker
+              multiple
+              disabledDate={(d) => d.isBefore(dayjs(), 'day')}
+              maxTagCount="responsive"
+              className="u-w-full"
+              getPopupContainer={popupContainer}
+            />
           </Form.Item>
           <div className="u-flex-gap-12">
             <Form.Item
@@ -260,6 +282,7 @@ function SlotsRail({ onOpenCandidate }: { onOpenCandidate: (candidateId: string)
                 showSearch
                 placeholder="00:00"
                 options={startOptions}
+                getPopupContainer={popupContainer}
                 onChange={() => form.setFieldValue('endTime', undefined)}
               />
             </Form.Item>
@@ -273,12 +296,13 @@ function SlotsRail({ onOpenCandidate }: { onOpenCandidate: (candidateId: string)
                 showSearch
                 placeholder="00:00"
                 disabled={!startTime}
+                getPopupContainer={popupContainer}
                 options={TIME_OPTIONS.filter((t) => !startTime || t.value > startTime)}
               />
             </Form.Item>
           </div>
         </Form>
-      </Modal>
+      </FormModal>
     </div>
   );
 }
@@ -290,9 +314,10 @@ export function InterviewsPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const [evaluateFor, setEvaluateFor] = useState<string | null>(null);
-  const [detailId, setDetailId] = useState<string | null>(null);
+  // 打开的候选人与筛选标签放在网址里：后退关抽屉、刷新不丢筛选
+  const [detailId, openDetail, closeDetail] = useDrawerParam('candidate');
   const [scheduleFor, setScheduleFor] = useState<Interview | null>(null);
-  const [filter, setFilter] = useState<Filter>('all');
+  const [filter, setFilter] = useUrlState<Filter>('tab', 'all');
 
   const interviewsQuery = useQuery({ queryKey: ['interviews', 'all'], queryFn: () => interviewsApi.list() });
 
@@ -353,14 +378,15 @@ export function InterviewsPage() {
   const groupListRef = useSyncedTableScroll<HTMLDivElement>();
 
   /** 所有分组共用同一套列定义，宽度写死，各组之间才对得齐 */
-  const IV_TABLE_X = 820;
+  const IV_TABLE_X = 836;
   const ivColumns: TableProps<Interview>['columns'] = [
     {
       title: '时间',
       key: 'time',
-      width: 60,
+      // 60 减去单元格内边距后放不下「14:00」，会折成两行
+      width: 76,
       render: (_, iv) => (
-        <span className="hf-primary hf-primary--sm hf-td--num">
+        <span className="hf-primary hf-primary--sm hf-td--num u-nowrap">
           {iv.scheduledAt ? dayjs(iv.scheduledAt).format('HH:mm') : '—'}
         </span>
       ),
@@ -455,15 +481,20 @@ export function InterviewsPage() {
         const pending = !iv.scheduledAt;
         const canSchedule = hasPermission(PERMISSIONS.INTERVIEW_SCHEDULE);
         const canEvaluate = hasPermission(PERMISSIONS.EVALUATION_SUBMIT);
+        const assignedToMe = iv.interviewers.some((i) => i.user.id === currentUserId);
+        // 面试官没有「安排面试」权限，但本场被指派时可以自己发选时链接
+        const canSendLink = pending && (canSchedule || assignedToMe);
         const detail = iv.application
-          ? { key: 'detail', label: '详情', hint: '查看候选人详情', onClick: () => setDetailId(iv.application!.candidate.id) }
+          ? { key: 'detail', label: '详情', hint: '查看候选人详情', onClick: () => openDetail(iv.application!.candidate.id) }
           : null;
         return (
           <RowActions
             actions={[
-              // 待安排：手动敲定是主路径，自助选时链接退到「···」里
               pending && canSchedule
                 ? { key: 'schedule', label: '安排', hint: '直接填写面试时间', onClick: () => setScheduleFor(iv) }
+                : null,
+              canSendLink
+                ? { key: 'link', label: '选时', hint: '生成自助选时链接发给候选人', onClick: () => void copySelfScheduleLink(iv.id) }
                 : null,
               !pending && iv.status === 'SCHEDULED' && canSchedule
                 ? { key: 'reschedule', label: '改期', hint: '修改面试时间（自动释放原档、占用新档）', onClick: () => setScheduleFor(iv) }
@@ -472,9 +503,6 @@ export function InterviewsPage() {
                 ? { key: 'evaluate', label: '面评', hint: '提交面试评价', onClick: () => setEvaluateFor(iv.id) }
                 : null,
               detail,
-              pending && canSchedule
-                ? { key: 'link', label: '选时', hint: '生成自助选时链接发给候选人', onClick: () => void copySelfScheduleLink(iv.id) }
-                : null,
             ]}
           />
         );
@@ -488,13 +516,13 @@ export function InterviewsPage() {
       <div className="hf-bar">
         <div className="hf-bar-left">
           <div className="hf-seg">
-            <span className={filter === 'all' ? 'hf-seg--on' : undefined} onClick={() => setFilter('all')}>
+            <span className={filter === 'all' ? 'hf-seg--on' : undefined} {...pressable(() => setFilter('all'))}>
               全部
             </span>
-            <span className={filter === 'mine' ? 'hf-seg--on' : undefined} onClick={() => setFilter('mine')}>
+            <span className={filter === 'mine' ? 'hf-seg--on' : undefined} {...pressable(() => setFilter('mine'))}>
               待我面评
             </span>
-            <span className={filter === 'pending' ? 'hf-seg--on' : undefined} onClick={() => setFilter('pending')}>
+            <span className={filter === 'pending' ? 'hf-seg--on' : undefined} {...pressable(() => setFilter('pending'))}>
               待安排
             </span>
           </div>
@@ -530,7 +558,9 @@ export function InterviewsPage() {
                 <div className="hf-state-title">{filter === 'all' ? '还没有面试安排' : '没有符合条件的面试'}</div>
                 <div className="hf-state-desc">
                   {filter === 'all'
-                    ? '在候选人详情里点「安排面试」，或把卡片拖到面试阶段，面试会自动出现在这里。'
+                    ? hasPermission(PERMISSIONS.INTERVIEW_SCHEDULE)
+                      ? '在候选人详情里点「安排面试」，或把卡片拖到面试阶段，面试会自动出现在这里。'
+                      : '被指派给你的面试会显示在这里。先在右侧添加可约时段，再用「选时」把链接发给候选人。'
                     : '切回「全部」查看所有面试。'}
                 </div>
               </div>
@@ -572,9 +602,12 @@ export function InterviewsPage() {
             </div>
           )}
 
-          <div className="hf-rail hf-rail--narrow">
-            <SlotsRail onOpenCandidate={setDetailId} />
-          </div>
+          {/* 可约时段接口要求 evaluation:submit；没有该权限的角色不渲染右栏，避免「添加」点了必然 403 */}
+          {hasPermission(PERMISSIONS.EVALUATION_SUBMIT) && (
+            <div className="hf-rail hf-rail--narrow">
+              <SlotsRail onOpenCandidate={openDetail} />
+            </div>
+          )}
         </div>
       </div>
 
@@ -584,7 +617,7 @@ export function InterviewsPage() {
         onClose={() => setEvaluateFor(null)}
       />
       <SetInterviewTimeModal interview={scheduleFor} onClose={() => setScheduleFor(null)} />
-      <CandidateDetailDrawer candidateId={detailId} onClose={() => setDetailId(null)} />
+      <CandidateDetailDrawer candidateId={detailId} onClose={closeDetail} />
     </div>
   );
 }

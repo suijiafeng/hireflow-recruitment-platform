@@ -12,6 +12,8 @@ import { ChartTip, SERIES, TrendChart } from '../../components/charts';
 import { EmptyBlock } from '../../components/ui';
 import { downloadCsv } from '../../utils/csv';
 import { pickDefaultJobId } from '../../utils/jobs';
+import { useUrlState } from '../../hooks/useUrlState';
+import { pressable } from '../../utils/pressable';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -37,8 +39,10 @@ function FunnelStageRow({
   const stayPct = stage.reached > 0 ? Math.round((stage.current / stage.reached) * 100) : 0;
   const conversionText = stage.conversion != null ? `${Math.round(stage.conversion * 100)}%` : '—';
   const lowConversion = stage.conversion != null && stage.conversion < 0.55;
-  const drop = prev ? prev.reached - stage.reached : 0;
-  const dropRate = prev && prev.reached > 0 ? Math.round((drop / prev.reached) * 100) : 0;
+  // 还停在上一阶段的人是在途，不是流失：只拿「已有结果」的人算流失
+  const decided = prev ? prev.reached - prev.current : 0;
+  const drop = prev ? Math.max(0, decided - stage.reached) : 0;
+  const dropRate = decided > 0 ? Math.round((drop / decided) * 100) : 0;
 
   return (
     <div className="funnel-stage">
@@ -80,14 +84,15 @@ function FunnelStageRow({
   );
 }
 
+/** 每个待办都落到「已按该口径筛好」的列表：点 12 就该看到这 12 条，而不是某个职位的看板 */
 const TODO_META = [
-  { key: 'newResumes' as const, label: '待处理新简历', link: '/pipeline' },
-  { key: 'myPendingEvaluations' as const, label: '我的待提交面评', link: '/interviews' },
-  { key: 'pendingOffers' as const, label: '待审批 Offer', link: '/offers' },
+  { key: 'newResumes' as const, label: '待处理新简历', link: '/candidates?stage=screening' },
+  { key: 'myPendingEvaluations' as const, label: '我的待提交面评', link: '/interviews?tab=mine' },
+  { key: 'pendingOffers' as const, label: '待审批 Offer', link: '/offers?tab=approve' },
   { key: 'rejectedOffers' as const, label: '被驳回待重提', link: '/offers' },
-  { key: 'offersDue' as const, label: 'Offer 到期待处理', link: '/offers' },
+  { key: 'offersDue' as const, label: 'Offer 到期待处理', link: '/offers?tab=reply' },
   { key: 'onboardingInProgress' as const, label: '进行中入职单', link: '/onboarding' },
-  { key: 'docsNeedReview' as const, label: '材料待人工核对', link: '/onboarding' },
+  { key: 'docsNeedReview' as const, label: '材料待人工核对', link: '/onboarding?tab=review' },
 ];
 
 /** 待办：单行清单（数字在前、标签在后），替代原来占两行的 7 张磁贴 */
@@ -104,7 +109,7 @@ function TodoStrip() {
         {visible.map((meta) => {
           const count = data?.[meta.key] ?? 0;
           return (
-            <div className="todo-strip-item" key={meta.key} onClick={() => navigate(meta.link)}>
+            <div className="todo-strip-item" key={meta.key} {...pressable(() => navigate(meta.link))}>
               <span className={count > 0 ? 'todo-strip-count todo-strip-count--hot' : 'todo-strip-count'}>
                 {todosQuery.isLoading ? '…' : count}
               </span>
@@ -119,7 +124,9 @@ function TodoStrip() {
 
 export function DashboardPage() {
   const { message } = App.useApp();
-  const [jobId, setJobId] = useState<string>();
+  const [jobParam, setJobParam] = useUrlState<string>('job', '');
+  const jobId = jobParam || undefined;
+  const setJobId = (v?: string) => setJobParam(v ?? '');
   const [insight, setInsight] = useState<{ text: string; provider: string; at: string } | null>(null);
 
   const jobsQuery = useQuery({
@@ -130,8 +137,8 @@ export function DashboardPage() {
   useEffect(() => {
     if (jobId) return;
     const preferred = pickDefaultJobId(jobsQuery.data?.items);
-    if (preferred) setJobId(preferred);
-  }, [jobId, jobsQuery.data]);
+    if (preferred) setJobParam(preferred);
+  }, [jobId, jobsQuery.data, setJobParam]);
 
   // 全局口径的 KPI 取这里；漏斗与「本职位在流程」才是选中职位的口径（同一个 queryKey，与洞察页共享缓存）
   const overviewQuery = useQuery({ queryKey: ['analytics-overview'], queryFn: analyticsApi.overview });
@@ -159,12 +166,15 @@ export function DashboardPage() {
    * 「在招职位」拿的是职位列表 total（含 DRAFT/PAUSED/CLOSED），改用 overview.openJobs；
    * 「在流程候选人」求和的是选中职位的漏斗，是单职位口径，标签补上「本职位」讲清楚范围。
    */
+  // 「待处理待办」曾经只取了新简历一项，和标签不符；改为待办条里所有可见项之和
+  const todoTotal = Object.values(todosQuery.data ?? {}).reduce<number>((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
+  // scope：同一排指标口径不同（全部职位 vs 当前选中职位），在标签下注明，避免把两种数字放在一起比
   const kpis = [
-    { label: '在招职位', value: overviewQuery.data?.openJobs ?? 0, unit: '个' },
-    { label: '本职位在流程', value: stages.reduce((sum, s) => sum + s.current, 0), unit: '人' },
-    { label: '本周新增投递', value: points[points.length - 1]?.applied ?? 0, unit: '份' },
-    { label: '本月入职', value: points.slice(-4).reduce((sum, p) => sum + p.hired, 0), unit: '人' },
-    { label: '待处理待办', value: todosQuery.data?.newResumes ?? 0, unit: '项' },
+    { label: '在招职位', scope: '全部职位', value: overviewQuery.data?.openJobs ?? 0, unit: '个' },
+    { label: '在流程', scope: '当前职位', value: stages.reduce((sum, s) => sum + s.current, 0), unit: '人' },
+    { label: '本周新增投递', scope: '全部职位', value: points[points.length - 1]?.applied ?? 0, unit: '份' },
+    { label: '本月入职', scope: '全部职位', value: points.slice(-4).reduce((sum, p) => sum + p.hired, 0), unit: '人' },
+    { label: '待处理待办', scope: '我的', value: todoTotal, unit: '项' },
   ];
 
   const jobOptions = jobsQuery.data?.items.map((j) => ({
@@ -231,7 +241,10 @@ export function DashboardPage() {
         <div className="kpi-strip">
           {kpis.map((k) => (
             <div className="kpi-cell" key={k.label}>
-              <div className="kpi-label">{k.label}</div>
+              <div className="kpi-label">
+                {k.label}
+                <span className="kpi-scope">{k.scope}</span>
+              </div>
               <div className="kpi-value">
                 <span className="kpi-num">{k.value}</span>
                 <span className="kpi-unit">{k.unit}</span>

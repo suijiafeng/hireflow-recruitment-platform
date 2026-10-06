@@ -6,8 +6,8 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ACTIVITY_ACTIONS, RoleCode } from '@hireflow/shared';
-import { departmentScopeOf } from '../../common/data-scope';
+import { ACTIVITY_ACTIONS, PERMISSIONS, RoleCode } from '@hireflow/shared';
+import { departmentScopeOf, isAssignedScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
 import { candidateActor, newPortalToken } from '../../common/portal';
 import type { Prisma } from '../../generated/prisma/client';
@@ -34,6 +34,8 @@ const CARD_SELECT = {
   stageId: true,
   stageEnteredAt: true,
   version: true,
+  // 预筛结果要在看板卡片上看得见：不符项标出来，HR 不用点进详情才知道要人工判断
+  prescreen: true,
   candidate: { select: { id: true, name: true, tags: true, source: true } },
 } as const;
 
@@ -110,6 +112,14 @@ export class ApplicationsService {
     const candidate = await this.prisma.candidate.findUnique({ where: { id: dto.candidateId } });
     if (!candidate) throw new NotFoundException('候选人不存在');
 
+    // 先查再建：已有记录（含淘汰 / 撤回）直接走复活 / 拒绝分支，不靠撞唯一键再回查——
+    // 本地 PGlite 在唯一键报错后同一连接的回查会拿到空结果，复活就会被误判成「仍在流程中」
+    const existing = await this.prisma.application.findUnique({
+      where: { candidateId_jobId: { candidateId: dto.candidateId, jobId: dto.jobId } },
+      select: { id: true, status: true },
+    });
+    if (existing) return this.reviveOrReject(existing, candidate, job, stage, user);
+
     try {
       const application = await this.prisma.application.create({
         data: {
@@ -131,51 +141,62 @@ export class ApplicationsService {
     } catch (e: unknown) {
       // P2002 = 唯一约束冲突（candidateId + jobId）
       if (typeof e === 'object' && e !== null && (e as { code?: string }).code === 'P2002') {
-        const existing = await this.prisma.application.findUnique({
+        // 并发下两次同时加入：后到的撞唯一键，回查后按同一规则处理
+        const raced = await this.prisma.application.findUnique({
           where: { candidateId_jobId: { candidateId: dto.candidateId, jobId: dto.jobId } },
           select: { id: true, status: true },
         });
-        // 已淘汰/已撤回的人重新进入本职位流程：复活原记录，而不是硬撞唯一键报 409。
-        // 唯一键 (candidateId, jobId) 决定了「新建一条」永远不可能，所以复活是唯一可行语义；
-        // 顺带保住同一条时间轴（历史面评/打分/淘汰原因都还挂在这条记录上）。
-        if (existing && (existing.status === 'REJECTED' || existing.status === 'WITHDRAWN')) {
-          const revived = await this.prisma.application.update({
-            where: { id: existing.id },
-            data: {
-              status: 'ACTIVE',
-              stageId: stage.id,
-              position: await this.nextPosition(stage.id),
-              stageEnteredAt: new Date(),
-              rejectReason: null,
-              version: { increment: 1 },
-            },
-            select: CARD_SELECT,
-          });
-          await this.activityLog.record(
-            user,
-            ACTIVITY_ACTIONS.APPLICATION_REACTIVATED,
-            'Application',
-            existing.id,
-            { candidate: candidate.name, job: job.title, stage: stage.name, from: existing.status },
-          );
-          return { ...revived, revived: true };
-        }
-        // 仍在流程中/已入职：重复投递不静默丢弃，在原应聘时间轴留痕后拒绝
-        if (existing) {
-          await this.activityLog.record(user, ACTIVITY_ACTIONS.APPLICATION_REAPPLIED, 'Application', existing.id, {
-            candidate: candidate.name,
-            job: job.title,
-            existingStatus: existing.status,
-          });
-        }
-        throw new ConflictException(
-          existing?.status === 'HIRED'
-            ? '该候选人已通过此职位入职，无需重复加入'
-            : '该候选人已在此职位流程中（重复投递已记录到原应聘时间轴）',
-        );
+        if (raced) return this.reviveOrReject(raced, candidate, job, stage, user);
       }
       throw e;
     }
+  }
+
+  /**
+   * 已淘汰/已撤回的人重新进入本职位流程：复活原记录，而不是硬撞唯一键报 409。
+   * 唯一键 (candidateId, jobId) 决定了「新建一条」永远不可能，所以复活是唯一可行语义；
+   * 顺带保住同一条时间轴（历史面评/打分/淘汰原因都还挂在这条记录上）。
+   * 仍在流程中 / 已入职：重复投递不静默丢弃，在原应聘时间轴留痕后拒绝。
+   */
+  private async reviveOrReject(
+    existing: { id: string; status: string },
+    candidate: { name: string },
+    job: { title: string },
+    stage: { id: string; name: string },
+    user: JwtUser,
+  ) {
+    if (existing.status === 'REJECTED' || existing.status === 'WITHDRAWN') {
+      const revived = await this.prisma.application.update({
+        where: { id: existing.id },
+        data: {
+          status: 'ACTIVE',
+          stageId: stage.id,
+          position: await this.nextPosition(stage.id),
+          stageEnteredAt: new Date(),
+          rejectReason: null,
+          version: { increment: 1 },
+        },
+        select: CARD_SELECT,
+      });
+      await this.activityLog.record(
+        user,
+        ACTIVITY_ACTIONS.APPLICATION_REACTIVATED,
+        'Application',
+        existing.id,
+        { candidate: candidate.name, job: job.title, stage: stage.name, from: existing.status },
+      );
+      return { ...revived, revived: true };
+    }
+    await this.activityLog.record(user, ACTIVITY_ACTIONS.APPLICATION_REAPPLIED, 'Application', existing.id, {
+      candidate: candidate.name,
+      job: job.title,
+      existingStatus: existing.status,
+    });
+    throw new ConflictException(
+      existing.status === 'HIRED'
+        ? '该候选人已通过此职位入职，无需重复加入'
+        : '该候选人已在此职位流程中（重复投递已记录到原应聘时间轴）',
+    );
   }
 
   /**
@@ -187,10 +208,15 @@ export class ApplicationsService {
   async board(jobId: string, user?: JwtUser) {
     // 数据行级权限：用人经理仅可打开本部门职位的看板
     if (user) {
+      // 「仅被指派」（面试官）没有职位视角：看板会暴露整条流程上所有候选人，
+      // 面试官只能经由「我的面试」/候选人详情看到被指派的人
+      if (isAssignedScope(user)) {
+        throw new ForbiddenException('仅可查看被指派的候选人，无权打开职位看板（数据范围：仅被指派）');
+      }
       const deptScope = departmentScopeOf(user);
       if (deptScope) {
         const owned = await this.prisma.job.findFirst({
-          where: { id: jobId, departmentId: deptScope },
+          where: { id: jobId, departmentId: { in: deptScope } },
           select: { id: true },
         });
         if (!owned) throw new ForbiddenException('仅可查看本部门职位的看板（数据范围：本部门）');
@@ -389,6 +415,14 @@ export class ApplicationsService {
       throw new BadRequestException('仅支持同一职位内的候选人对比');
     }
     await this.assertJobDepartmentScope(apps[0].jobId, user);
+    if (isAssignedScope(user)) {
+      const assigned = await this.prisma.application.count({
+        where: { id: { in: unique }, interviews: { some: { interviewers: { some: { userId: user.sub } } } } },
+      });
+      if (assigned !== unique.length) {
+        throw new ForbiddenException('仅可对比被指派面试的候选人（数据范围：仅被指派）');
+      }
+    }
 
     const candidates = apps.map((a) => {
       const evaluations = a.interviews
@@ -461,6 +495,8 @@ export class ApplicationsService {
       candidateName: application.candidate.name,
       jobTitle: application.job.title,
       prescreen: application.prescreen,
+      /** 已淘汰 / 撤回 / 入职：问卷不再开放 */
+      closed: application.status !== 'ACTIVE',
     };
   }
 
@@ -475,7 +511,7 @@ export class ApplicationsService {
   ) {
     const application = await this.prisma.application.findUnique({
       where: { prescreenToken: token },
-      include: { candidate: { select: { name: true } }, job: { select: { id: true, title: true } } },
+      include: { candidate: { select: { id: true, name: true } }, job: { select: { id: true, title: true, departmentId: true } } },
     });
     if (!application) throw new NotFoundException('链接无效或已失效，请联系 HR');
     if (application.status !== 'ACTIVE') throw new BadRequestException('该应聘已不在流程中，预筛链接已失效');
@@ -515,15 +551,16 @@ export class ApplicationsService {
       candidate: application.candidate.name,
       flags,
     });
-    await this.notifications.pushToRole(
-      RoleCode.HR,
+    await this.notifications.pushByPermission(
+      PERMISSIONS.INTERVIEW_SCHEDULE,
+      application.job.departmentId,
       flags.length
         ? `预筛存在不符项：${application.candidate.name}`
         : `预筛已回收：${application.candidate.name}`,
       flags.length
         ? `${application.job.title} · ${flags.join('；')} · 请人工判断是否继续邀约`
         : `${application.job.title} · 硬性条件均符合，可安排邀约`,
-      '/pipeline',
+      `/candidates?candidate=${application.candidate.id}`,
     );
     return this.prescreenView(token);
   }
@@ -583,12 +620,12 @@ export class ApplicationsService {
         version: { increment: 1 },
       },
     });
-    await this.activityLog.record(
+    await this.activityLog.recordAuto(
       user,
       ACTIVITY_ACTIONS.APPLICATION_STAGE_CHANGED,
       'Application',
       applicationId,
-      { candidate: application.candidate.name, from: application.stage.name, to: stageName, auto: true },
+      { candidate: application.candidate.name, from: application.stage.name, to: stageName },
     );
   }
 
@@ -604,7 +641,7 @@ export class ApplicationsService {
   private async assertJobDepartmentScope(jobId: string, user: JwtUser) {
     const deptScope = departmentScopeOf(user);
     if (!deptScope) return;
-    const owned = await this.prisma.job.findFirst({ where: { id: jobId, departmentId: deptScope }, select: { id: true } });
+    const owned = await this.prisma.job.findFirst({ where: { id: jobId, departmentId: { in: deptScope } }, select: { id: true } });
     if (!owned) throw new ForbiddenException('无权操作其他部门的应聘记录（数据范围：本部门）');
   }
 }

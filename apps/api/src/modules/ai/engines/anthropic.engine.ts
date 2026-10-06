@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Logger } from '@nestjs/common';
-import { EvaluationConclusion } from '@hireflow/shared';
+import { AI_DRAFT_MARKER, EvaluationConclusion } from '@hireflow/shared';
 import type {
   AiEngine,
   CompareInput,
@@ -266,7 +266,7 @@ export class AnthropicAiEngine implements AiEngine {
         '你是面试评价助手。根据面试官的原始记录，生成结构化面评草稿供面试官修改确认。',
         `评分卡维度为本岗位模板（逐一输出，勿增减）：${dimensions.join('、')}，各 1-5 整数分。`,
         '结论从 STRONG_YES/YES/NO/STRONG_NO 中选择。评语客观、基于记录、不夸大。',
-        '在 comments 开头注明【AI 草稿·请修改确认】。',
+        `在 comments 开头注明${AI_DRAFT_MARKER}。`,
       ].join('\n'),
       [
         `候选人：${input.candidateName}`,
@@ -279,7 +279,8 @@ export class AnthropicAiEngine implements AiEngine {
       draft.conclusion = EvaluationConclusion.YES;
     }
     draft.scorecard = draft.scorecard
-      .filter((s) => ['技术能力', '工程素养', '沟通协作'].includes(s.dimension))
+      // 按本次请求的维度过滤（岗位模板），而不是写死默认三项——否则自定义模板的分全被丢掉
+      .filter((s) => dimensions.includes(s.dimension))
       .map((s) => ({ ...s, score: Math.max(1, Math.min(5, Math.round(s.score))) }));
     return draft;
   }

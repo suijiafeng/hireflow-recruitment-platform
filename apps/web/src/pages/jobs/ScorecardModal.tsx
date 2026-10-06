@@ -1,9 +1,10 @@
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Form, Input, InputNumber, Modal, Space, Typography } from 'antd';
+import { App, Button, Form, Input, InputNumber, Space, Typography } from 'antd';
 import { jobsApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import type { Job } from '../../api/types';
+import { FormModal } from '../../components/FormModal';
 
 /** 岗位评分卡模板配置 */
 export function ScorecardModal({ job, onClose }: { job: Job | null; onClose: () => void }) {
@@ -24,7 +25,7 @@ export function ScorecardModal({ job, onClose }: { job: Job | null; onClose: () 
   });
 
   return (
-    <Modal
+    <FormModal form={form}
       className="hf-modal"
       title={job ? `评分卡模板 · ${job.title}` : '评分卡模板'}
       open={Boolean(job)}
@@ -87,6 +88,6 @@ export function ScorecardModal({ job, onClose }: { job: Job | null; onClose: () 
           )}
         </Form.List>
       </Form>
-    </Modal>
+    </FormModal>
   );
 }

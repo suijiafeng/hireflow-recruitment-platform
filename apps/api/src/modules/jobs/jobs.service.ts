@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ACTIVITY_ACTIONS, DEFAULT_PIPELINE_STAGES } from '@hireflow/shared';
-import { departmentScopeOf } from '../../common/data-scope';
+import { departmentScopeOf, inDepartmentScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
 import type { Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
@@ -33,7 +33,7 @@ export class JobsService {
     const where: Prisma.JobWhereInput = {
       ...(keyword ? { title: { contains: keyword, mode: 'insensitive' } } : {}),
       ...(status ? { status } : {}),
-      ...(deptScope ? { departmentId: deptScope } : {}),
+      ...(deptScope ? { departmentId: { in: deptScope } } : {}),
     };
     const [total, items] = await this.prisma.$transaction([
       this.prisma.job.count({ where }),
@@ -82,8 +82,7 @@ export class JobsService {
     const department = await this.prisma.department.findUnique({ where: { id: dto.departmentId } });
     if (!department) throw new BadRequestException('所属部门不存在');
     if (dto.hiringManagerId) {
-      const manager = await this.prisma.user.findUnique({ where: { id: dto.hiringManagerId } });
-      if (!manager) throw new BadRequestException('用人经理不存在');
+      await this.assertManagerActive(dto.hiringManagerId);
     }
     const job = await this.prisma.job.create({
       data: {
@@ -123,8 +122,15 @@ export class JobsService {
     return job;
   }
 
+  private async assertManagerActive(hiringManagerId: string) {
+    const manager = await this.prisma.user.findUnique({ where: { id: hiringManagerId }, select: { status: true } });
+    if (!manager) throw new BadRequestException('用人经理不存在');
+    if (manager.status !== 'ACTIVE') throw new BadRequestException('该用人经理账号已停用，请改选在职成员');
+  }
+
   async update(id: string, dto: UpdateJobDto, user: JwtUser) {
     await this.ensureExists(id);
+    if (dto.hiringManagerId) await this.assertManagerActive(dto.hiringManagerId);
     const { scorecardTemplate, ...rest } = dto;
     const job = await this.prisma.job.update({
       where: { id },
@@ -320,7 +326,7 @@ export class JobsService {
   /** 部门数据范围校验（用人经理仅本部门职位；ALL scope / 无 user 直接放行） */
   private assertJobInDeptScope(job: { departmentId: string }, user?: JwtUser) {
     const deptScope = user ? departmentScopeOf(user) : null;
-    if (deptScope && job.departmentId !== deptScope) {
+    if (deptScope && !inDepartmentScope(deptScope, job.departmentId)) {
       throw new ForbiddenException('仅可访问本部门职位（数据范围：本部门）');
     }
   }

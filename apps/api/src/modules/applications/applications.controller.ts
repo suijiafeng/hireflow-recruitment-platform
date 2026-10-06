@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSIONS } from '@hireflow/shared';
 import { CurrentUser, type JwtUser } from '../../common/decorators/current-user.decorator';
@@ -57,6 +57,7 @@ export class ApplicationsController {
 
   // 批量路由必须声明在 :id 参数路由之前（Nest 按声明顺序匹配，否则 "batch" 会被当作 :id）
   @Post('applications/batch/reject')
+  @HttpCode(200) // 逐条成败明细，不创建资源；全部失败也是一次成功的处理
   @RequirePermissions(PERMISSIONS.APPLICATION_MOVE)
   @ApiOperation({ summary: '批量淘汰（≤100 条，返回成败明细）' })
   batchReject(@Body() dto: BatchRejectDto, @CurrentUser() user: JwtUser) {
@@ -64,6 +65,7 @@ export class ApplicationsController {
   }
 
   @Post('applications/batch/move')
+  @HttpCode(200) // 逐条成败明细，不创建资源；全部失败也是一次成功的处理
   @RequirePermissions(PERMISSIONS.APPLICATION_MOVE)
   @ApiOperation({ summary: '批量移动阶段（≤100 条，返回成败明细）' })
   batchMove(@Body() dto: BatchMoveDto, @CurrentUser() user: JwtUser) {
