@@ -2,7 +2,9 @@ import { BellOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge, Button, List, Popover, Typography } from 'antd';
 import dayjs from 'dayjs';
+import { useState } from 'react';
 import { useNavigate } from 'react-router';
+import { pressable } from '../utils/pressable';
 import { notificationsApi } from '../api';
 import type { NotificationItem } from '../api/types';
 import { EmptyBlock } from './ui';
@@ -27,14 +29,23 @@ export function NotificationBell() {
     onSuccess: (data) => queryClient.setQueryData(['notifications'], data),
   });
 
+  // 受控弹层：点了某条通知就收起，否则跳转后面板还盖在目标页面上
+  const [open, setOpen] = useState(false);
+
   const handleClick = (item: NotificationItem) => {
     if (!item.read) readMutation.mutate(item.id);
-    if (item.link) navigate(item.link);
+    if (item.link) {
+      setOpen(false);
+      navigate(item.link);
+    }
   };
 
   return (
     <Popover
+      rootClassName="notif-popover"
       trigger="click"
+      open={open}
+      onOpenChange={setOpen}
       placement="bottomRight"
       title={
         <div className="u-flex-between">
@@ -57,7 +68,7 @@ export function NotificationBell() {
               renderItem={(item) => (
                 <List.Item
                   className={item.read ? 'notif-item notif-item--read' : 'notif-item'}
-                  onClick={() => handleClick(item)}
+                  {...pressable(() => handleClick(item))}
                 >
                   <div className="u-w-full">
                     <div className="notif-row">

@@ -33,6 +33,24 @@ export class ActivityLogService {
     });
   }
 
+  /**
+   * 系统自动动作的留痕（自动移卡、满编暂停、入职闭环、Webhook 等）：操作人记为「系统」，
+   * 触发它的人写进 payload.triggeredBy。否则时间轴上会出现「IT 把卡片移到了已入职」这种误导。
+   */
+  async recordAuto(
+    trigger: JwtUser | null,
+    action: ActivityAction,
+    entityType: string,
+    entityId: string,
+    payload?: Record<string, unknown>,
+  ) {
+    return this.record(null, action, entityType, entityId, {
+      ...payload,
+      auto: true,
+      triggeredBy: trigger?.name ?? null,
+    } as Prisma.InputJsonValue);
+  }
+
   /** 审计日志：全局最近操作 */
   async recent(page: number, pageSize: number) {
     const [total, items] = await this.prisma.$transaction([
