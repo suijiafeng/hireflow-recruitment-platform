@@ -29,6 +29,21 @@ export function candidateActor(name: string): JwtUser {
 /** 中国时区偏移（+8h）：部署环境（容器默认 UTC）不保证配置 TZ，涉及"当天"的日期计算一律按此显式换算，不依赖服务器本地时区 */
 export const CN_TZ_OFFSET_MS = 8 * 3600 * 1000;
 
+/** 通知 / 门户里的时间一律按北京时间显示：容器默认 UTC，toLocaleString 会差 8 小时 */
+export function formatCnDateTime(d: Date | string): string {
+  const date = typeof d === 'string' ? new Date(d) : d;
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const get = (t: string) => parts.find((x) => x.type === t)?.value ?? '';
+  return `${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
+}
+
 /** 从 from 起加 N 个工作日（跳过周六日；法定节假日后续接日历服务），按北京时间计算，截止到当天 23:59:59 */
 export function addBusinessDays(from: Date, days: number): Date {
   // 平移到「以 UTC 方法读写 = 读写北京时间」的等效时刻，日期算术跑完再平移回真实 UTC 时刻

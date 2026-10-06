@@ -31,3 +31,29 @@ export function maskEmail(email: string): string {
   const keep = local.length >= 3 ? local.slice(0, 2) : local.slice(0, 1);
   return `${keep}${STARS}${domain}`;
 }
+
+/**
+ * 自由文本里的联系方式打码（简历原文、AI 解析结果）。
+ * 只遮蔽主记录的 phone/email 字段不够：简历正文几乎都写着手机号和邮箱，原样下发等于没脱敏。
+ * 手机号：中国大陆 11 位，允许 +86 前缀与空格/短横分隔；邮箱：常规 local@domain 形态。
+ */
+const EMAIL_IN_TEXT = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const MOBILE_IN_TEXT = /(?<!\d)(?:\+?86[\s-]?)?1[3-9]\d(?:[\s-]?\d){8}(?!\d)/g;
+
+export function maskContactsInText(text: string): string {
+  return text
+    .replace(EMAIL_IN_TEXT, (m) => maskEmail(m))
+    .replace(MOBILE_IN_TEXT, (m) => maskPhone(m.replace(/^\+?86[\s-]?/, '')));
+}
+
+/** 对任意 JSON 结构里的所有字符串做联系方式打码（AI 解析结果的字段名不固定，按值处理最稳） */
+export function maskContactsDeep<T>(value: T): T {
+  if (typeof value === 'string') return maskContactsInText(value) as T;
+  if (Array.isArray(value)) return value.map((v) => maskContactsDeep(v)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, maskContactsDeep(v)]),
+    ) as T;
+  }
+  return value;
+}
