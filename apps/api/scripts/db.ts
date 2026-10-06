@@ -7,8 +7,9 @@
  *
  * 几个必须知道的约束：
  *  1. PGlite 单进程独占数据目录。serve 在跑的时候不能再跑 setup，反之亦然。
- *  2. pglite-socket 的 maxConnections 默认是 1，而 Prisma 是连接池——必须显式调大，
- *     否则第二条连接就永远排队，表现为整个应用卡死。
+ *  2. pglite-socket 背后只有一个会话：多条连接并发发扩展协议消息会互相穿插，
+ *     查询串台（随机 500，甚至返回别的查询的结果）。API 的 Prisma 连接池必须收成 1 条
+ *     （.env 里 DATABASE_POOL_MAX=1）。
  *  3. 不要用 pg_restore 走这个 socket 灌数据：多路复用器扛不住那种带超级用户 DDL 的会话，
  *     会把服务卡僵到必须重启。要导数据用 `import` 子命令，它是进程内直接 exec，绕开 socket。
  *
@@ -92,7 +93,8 @@ async function listen(db: PGlite, port: number) {
     db,
     port,
     host: '127.0.0.1',
-    // 默认只给 1 条连接，Prisma 连接池会从第二条起全部排队、表现为整个应用挂起
+    // 允许多条连接接入（API + prisma studio + 迁移脚本同时连），但它们共享同一个单会话后端，
+    // 并发的扩展协议消息会互相穿插。API 侧靠 DATABASE_POOL_MAX=1 保证同一时刻只有一条在用。
     maxConnections: 20,
   });
   // 是 EventTarget 不是 EventEmitter，用 addEventListener（README 里写的 .on() 是错的）
@@ -136,6 +138,9 @@ function prisma(args: string[]): Promise<void> {
 async function setup() {
   const port = dbPort();
   await assertNotRunning(port);
+  // 生成的 client 不进仓库：全新 clone 后 seed 会因缺 src/generated/prisma 直接失败；
+  // 拉了新 schema 的人也需要重新生成。不放 postinstall——Docker 的 deps 层装依赖时还没有 schema。
+  await prisma(['generate']);
   const firstRun = !existsSync(DATA_DIR);
   const db = await open();
   const server = await listen(db, port);

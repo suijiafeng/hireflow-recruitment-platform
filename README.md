@@ -338,7 +338,7 @@ S3_BUCKET_NAME="hireflow-private"
 # 应用
 API_ORIGIN="http://localhost:3000"
 FRONTEND_ORIGIN="http://localhost:5173"
-JWT_SECRET="your-secret-key-here"
+JWT_SECRET="<至少 32 位随机值，如 openssl rand -base64 48 的输出>"  # 生产环境用占位值会拒绝启动
 ```
 
 ### Docker 镜像说明

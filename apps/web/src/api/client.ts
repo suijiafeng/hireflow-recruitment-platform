@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { useAuthStore } from '../stores/auth';
+import { loginUrlFor } from '../utils/redirect';
 
 export const http = axios.create({ baseURL: '/api', timeout: 15_000 });
 
@@ -14,8 +15,9 @@ http.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       useAuthStore.getState().logout();
+      // 令牌过期：带上当前页面，重新登录后回到原处，而不是被扔回首页
       if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+        window.location.href = loginUrlFor(window.location.pathname + window.location.search);
       }
     }
     return Promise.reject(error);
