@@ -17,8 +17,8 @@ import {
 } from '@ant-design/icons';
 import { PERMISSIONS, ROLE_LABEL, type RoleCode } from '@hireflow/shared';
 import { Avatar, Breadcrumb, Button, Drawer, Dropdown, Layout, Menu, Result, Space, Tag, Typography } from 'antd';
-import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { authApi } from '../api';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 import { NotificationBell } from '../components/NotificationBell';
@@ -88,18 +88,14 @@ const MENU_DEFS: Array<{
   },
 ];
 
-/** 登录后的首页 = 第一个有权限看的菜单项；面试官落到面试页（可约时段在右栏），IT 落入职管理 */
+/**
+ * 登录后的首页 = 左侧菜单里第一个有权限看的菜单项，与菜单显隐用同一份 MENU_DEFS，
+ * 不再为某个角色单独特判（否则默认页与菜单第一项不一致，切换账号时容易困惑）。
+ * 「入职问答」不配权限、全员可见，所以兜底一定能找到。
+ */
 export function firstVisiblePath(hasPermission: (p: string) => boolean): string {
-  // 面试官没有大盘/职位权限，菜单序会落到「候选人」——但他们的主操作是维护可约时段
-  if (
-    hasPermission(PERMISSIONS.EVALUATION_SUBMIT) &&
-    !hasPermission(PERMISSIONS.DASHBOARD_VIEW) &&
-    !hasPermission(PERMISSIONS.JOB_READ)
-  ) {
-    return '/interviews';
-  }
-  const paths = MENU_DEFS.flatMap((group) => group.children);
-  return paths.find((item) => !item.perms || item.perms.some((p) => hasPermission(p)))?.key ?? '/helpdesk';
+  const items = MENU_DEFS.flatMap((group) => group.children);
+  return items.find((item) => !item.perms || item.perms.some((p) => hasPermission(p)))?.key ?? '/helpdesk';
 }
 
 export function MainLayout() {
@@ -108,6 +104,9 @@ export function MainLayout() {
   const { token, user, logout } = useAuthStore();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const setUser = useAuthStore((s) => s.setUser);
+  const queryClient = useQueryClient();
+  /** 主动点「退出登录」时置位：此时跳登录页不能带 redirect，否则下一个账号会被带回上一个账号的页面 */
+  const explicitLogout = useRef(false);
 
   // 服务端每次请求都按库里的当前角色鉴权；这里同步刷新本地缓存的权限，
   // 否则管理员降权 / 加权后，菜单和按钮要等重新登录才变（回到窗口时也会刷新一次）
@@ -143,7 +142,10 @@ export function MainLayout() {
   const titleKey = Object.keys(PAGE_TITLES).find((key) => location.pathname.startsWith(key));
   useDocumentTitle(titleKey ? `${PAGE_TITLES[titleKey]} · ART 智能招聘` : 'ART 智能招聘');
 
-  if (!token) return <Navigate to={loginUrlFor(location.pathname + location.search)} replace />;
+  // 会话过期（401 清 token）才带 redirect 回跳；主动退出直接去登录页，让下一个账号落到自己的默认菜单
+  if (!token) {
+    return <Navigate to={explicitLogout.current ? '/login' : loginUrlFor(location.pathname + location.search)} replace />;
+  }
 
   const selectedKey = Object.keys(PAGE_TITLES).find((key) => location.pathname.startsWith(key));
   const menu = (
@@ -238,8 +240,11 @@ export function MainLayout() {
                     icon: <LogoutOutlined />,
                     label: '退出登录',
                     onClick: () => {
+                      explicitLogout.current = true;
+                      // token 清空后上面的 Navigate 会接管跳转，这里不再手动 navigate（避免两次跳转打架）
                       logout();
-                      navigate('/login');
+                      // 退出即清缓存：下一个登录的账号不能看到上一个账号的任何数据
+                      queryClient.clear();
                     },
                   },
                 ],

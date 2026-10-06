@@ -1,5 +1,5 @@
 import { EyeInvisibleOutlined, EyeTwoTone, LockOutlined, MailOutlined, RocketOutlined } from '@ant-design/icons';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Alert, App, Button, Card, Form, Input } from 'antd';
 import { Navigate, useNavigate, useSearchParams } from 'react-router';
 import { useState } from 'react';
@@ -38,6 +38,7 @@ export function LoginPage() {
   /** 从受保护页面被带到登录页时，登录后回到原页面 */
   const redirectTo = safeRedirect(searchParams.get('redirect')) ?? '/';
   const { message } = App.useApp();
+  const queryClient = useQueryClient();
   const { token, setAuth } = useAuthStore();
   const [form] = Form.useForm<{ email: string; password: string }>();
   /** 登录失败的提示放在表单里：顶部一闪而过的 toast 离输入框太远，容易错过 */
@@ -47,6 +48,9 @@ export function LoginPage() {
   const loginMutation = useMutation({
     mutationFn: authApi.login,
     onSuccess: (data) => {
+      // 切换账号：先清掉上一个账号的查询缓存（个人信息 60s 内不会重拉，通知/列表也会短暂串号），
+      // 否则布局层会把旧账号的 profile 写回本地状态，表现为"账号显示错了，刷新才对"
+      queryClient.clear();
       setAuth(data.accessToken, data.user);
       message.success(`欢迎回来，${data.user.name}`);
       navigate(redirectTo, { replace: true });
