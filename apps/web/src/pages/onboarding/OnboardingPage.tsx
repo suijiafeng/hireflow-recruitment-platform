@@ -1,6 +1,12 @@
 import { FileProtectOutlined, IdcardOutlined, LinkOutlined, PlusOutlined, WarningOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CONTRACT_SIGN_STATUS_LABEL, DOCUMENT_TYPE_META, PERMISSIONS, type ContractSignStatus } from '@hireflow/shared';
+import {
+  CONTRACT_SIGN_STATUS_LABEL,
+  DOCUMENT_FIELD_LABEL,
+  DOCUMENT_TYPE_META,
+  PERMISSIONS,
+  type ContractSignStatus,
+} from '@hireflow/shared';
 import { App, Button, Form, Input, Modal, Select, Spin, Steps, Table, Typography, Upload } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
@@ -11,6 +17,11 @@ import { extractErrorMessage } from '../../api/client';
 import { QueryErrorResult } from '../../components/QueryErrorResult';
 import type { ChecklistItem, Onboarding } from '../../api/types';
 import { useAuthStore } from '../../stores/auth';
+import { ContractText } from '../../components/ContractText';
+import { FormModal } from '../../components/FormModal';
+import { useDrawerParam, useUrlState } from '../../hooks/useUrlState';
+import { prepareUpload } from '../../utils/prepareUpload';
+import { pressable } from '../../utils/pressable';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -21,7 +32,7 @@ const OWNER_LABEL: Record<ChecklistItem['owner'], string> = {
 };
 const SIGN_STEP: Record<string, number> = { DRAFT: 1, SENT: 2, SIGNED: 3, ARCHIVED: 4 };
 
-type Filter = 'active' | 'done' | 'review';
+type Filter = 'mine' | 'active' | 'done' | 'review';
 
 /** 右栏：选中入职单的三方清单 + 材料 + 合同。取代原来 720px 抽屉 */
 function DetailRail({ id }: { id: string | null }) {
@@ -60,13 +71,13 @@ function DetailRail({ id }: { id: string | null }) {
       .catch((error) => message.error(extractErrorMessage(error, '操作失败')));
   };
 
-  const copyPortalLink = async (onboardingId: string) => {
+  const copyPortalLink = async (onboardingId: string, rotate = false) => {
     try {
-      const { token } = await onboardingApi.portalLink(onboardingId);
+      const { token } = await onboardingApi.portalLink(onboardingId, rotate);
       const url = `${window.location.origin}/portal/onboarding/${token}`;
       try {
         await navigator.clipboard.writeText(url);
-        message.success('新员工链接已复制，请通过邮件/IM 发送');
+        message.success(rotate ? '已重新生成并复制新链接，旧链接已失效' : '新员工链接已复制，请通过邮件/IM 发送');
       } catch {
         modal.info({
           title: '新员工资料填报链接',
@@ -147,10 +158,27 @@ function DetailRail({ id }: { id: string | null }) {
             <span className="u-flex-1">{needReview} 项材料仅有图片、未识别出字段，需人工核对</span>
           </div>
         )}
-        {canManage && (
-          <Button size="small" icon={<LinkOutlined />} className="u-mb-16" onClick={() => void copyPortalLink(detail.id)}>
-            复制新员工资料填报链接
-          </Button>
+        {/* 闭环后服务端不再发放链接（门户含未脱敏的薪资与证件信息） */}
+        {canManage && detail.status !== 'COMPLETED' && (
+          <div className="u-flex-gap-8 u-mb-16">
+            <Button size="small" icon={<LinkOutlined />} onClick={() => void copyPortalLink(detail.id)}>
+              复制新员工资料填报链接
+            </Button>
+            <Button
+              size="small"
+              type="text"
+              onClick={() =>
+                modal.confirm({
+                  title: '重新生成资料填报链接？',
+                  content: '旧链接将立即失效，请把新链接重新发给新员工。',
+                  cancelText: '取消',
+                  onOk: () => copyPortalLink(detail.id, true),
+                })
+              }
+            >
+              重置链接
+            </Button>
+          </div>
         )}
 
         {/* 三方清单：按责任方分组，勾选框 + 完成时间，不再每组套一张 Card */}
@@ -171,10 +199,10 @@ function DetailRail({ id }: { id: string | null }) {
                 <div
                   key={item.key}
                   className={editable ? 'hf-check-row' : 'hf-check-row hf-check-row--static'}
-                  onClick={() => {
+                  {...pressable(() => {
                     if (editable)
                       run(() => onboardingApi.toggle(detail.id, item.key, !item.done), item.done ? '已取消勾选' : '已完成');
-                  }}
+                  })}
                 >
                   <span className={item.done ? 'hf-check hf-check--on' : 'hf-check'}>{item.done ? '✓' : ''}</span>
                   <span className={item.done ? 'hf-check-label hf-check-label--done' : 'hf-check-label'}>
@@ -198,16 +226,18 @@ function DetailRail({ id }: { id: string | null }) {
                   <span className="u-flex-gap-8">
                     {doc.needsReview && <span className="hf-tag hf-tag--warn">待人工核对</span>}
                     {doc.fileUrl && (
-                      <span className="hf-link" onClick={() => window.open(doc.fileUrl!, '_blank')}>
+                      <span className="hf-link" {...pressable(() => window.open(doc.fileUrl!, '_blank'))}>
                         原件
                       </span>
                     )}
                   </span>
                 </div>
-                {Object.keys(doc.fields).length > 0 ? (
+                {doc.redacted ? (
+                  <div className="hf-faint">证件信息仅 HR 可见</div>
+                ) : Object.keys(doc.fields).length > 0 ? (
                   Object.entries(doc.fields).map(([k, v]) => (
                     <div key={k} className="hf-check-row hf-check-row--static">
-                      <span className="hf-muted hf-field-key">{k}</span>
+                      <span className="hf-muted hf-field-key">{DOCUMENT_FIELD_LABEL[k] ?? k}</span>
                       <span className="hf-secondary u-flex-1">{v}</span>
                     </div>
                   ))
@@ -249,7 +279,27 @@ function DetailRail({ id }: { id: string | null }) {
             <div className="hf-check-row hf-check-row--static">
               <span className="hf-muted hf-field-key">模板</span>
               <span className="hf-secondary u-flex-1">{contract.templateName}</span>
+              <span
+                className="hf-link"
+                {...pressable(() =>
+                  modal.info({
+                    title: `劳动合同 · ${detail.application.candidate.name}`,
+                    width: 560,
+                    icon: null,
+                    content: <ContractText variables={contract.variables} />,
+                    okText: '关闭',
+                  }),
+                )}
+              >
+                预览全文
+              </span>
             </div>
+            {Boolean(contract.variables?.startDate) && (
+              <div className="hf-check-row hf-check-row--static">
+                <span className="hf-muted hf-field-key">入职日期</span>
+                <span className="hf-secondary hf-td--num u-flex-1">{String(contract.variables?.startDate)}</span>
+              </div>
+            )}
             <div className="hf-check-row hf-check-row--static">
               <span className="hf-muted hf-field-key">状态</span>
               <span className="u-flex-1">
@@ -277,26 +327,51 @@ function DetailRail({ id }: { id: string | null }) {
                 type="primary"
                 block
                 className="u-mt-8"
-                onClick={() => run(() => onboardingApi.sendContract(contract.id), '已发送至电子签服务商')}
+                onClick={() =>
+                  onboardingApi
+                    .sendContract(contract.id)
+                    .then(() => {
+                      invalidate();
+                      // 新员工没有站内账号，系统通知不到他：发完立刻引导 HR 把签署入口转过去
+                      modal.confirm({
+                        title: '合同已发出',
+                        content: `请把门户链接发给${detail.application.candidate.name}，新员工在门户里阅读并签署。`,
+                        okText: '复制门户链接',
+                        cancelText: '稍后',
+                        onOk: () => copyPortalLink(detail.id),
+                      });
+                    })
+                    .catch((error) => message.error(extractErrorMessage(error, '发送失败')))
+                }
               >
                 发送签署
               </Button>
             )}
             {contract.signStatus === 'SENT' && canManage && (
-              <Button
-                type="primary"
-                block
-                className="u-mt-8"
-                onClick={() => run(() => onboardingApi.signContract(contract.id), '签署完成：已存证、通知 IT 开账号')}
-              >
-                完成签署（代签 / 模拟回调）
-              </Button>
+              <>
+                <div className="hf-muted u-mt-8">等待新员工在门户签署</div>
+                <Button block className="u-mt-8" onClick={() => copyPortalLink(detail.id)}>
+                  复制签署链接
+                </Button>
+                {import.meta.env.DEV && (
+                  <Button
+                    block
+                    type="dashed"
+                    className="u-mt-8"
+                    onClick={() =>
+                      run(() => onboardingApi.signContract(contract.id), '已模拟签署回调：已存证、通知 IT')
+                    }
+                  >
+                    模拟电子签回调（仅开发环境）
+                  </Button>
+                )}
+              </>
             )}
           </>
         )}
       </div>
 
-      <Modal
+      <FormModal form={docForm}
         className="hf-modal"
         title="提交入职材料"
         open={docOpen}
@@ -319,8 +394,16 @@ function DetailRail({ id }: { id: string | null }) {
             <Upload
               accept="image/*,.pdf"
               maxCount={1}
+              // 受控文件列表 + 上传前处理（大图压缩、超限拦截）：列表里显示的就是实际要传的文件
+              fileList={docFile ? [{ uid: 'picked', name: docFile.name, status: 'done' as const }] : []}
               beforeUpload={(file) => {
-                setDocFile(file as unknown as File);
+                void prepareUpload(file as unknown as File).then((r) => {
+                  if (r.ok) setDocFile(r.file);
+                  else {
+                    setDocFile(null);
+                    message.error(r.reason);
+                  }
+                });
                 return false;
               }}
               onRemove={() => setDocFile(null)}
@@ -337,20 +420,36 @@ function DetailRail({ id }: { id: string | null }) {
             <Input.TextArea rows={4} placeholder="如：姓名：杨帆 公民身份号码 110105199305124533 住址：…" />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
     </div>
   );
 }
 
 export function OnboardingPage() {
-  const [selected, setSelected] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>('active');
+  // 打开的入职单与筛选标签放在网址里：后退关闭详情、刷新不丢、通知可直接链接到某张入职单
+  const [selected, openSelected, closeSelected] = useDrawerParam('onboarding');
+  const roles = useAuthStore((s) => s.user?.roles ?? []);
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  // 我负责哪一方的待办：IT 只管 IT 项；HR（onboarding:manage）管 HR 项。其余角色没有「我的待办」
+  const myOwner: ChecklistItem['owner'] | null = roles.includes('IT_SUPPORT')
+    ? 'IT'
+    : hasPermission(PERMISSIONS.ONBOARDING_MANAGE)
+      ? 'HR'
+      : null;
+  // IT 打开页面最关心的就是「哪几单还等着我」：默认落在我的待办
+  const [filter, setFilter] = useUrlState<Filter>('tab', myOwner === 'IT' ? 'mine' : 'active');
   const listQuery = useQuery({ queryKey: ['onboardings'], queryFn: onboardingApi.list, retry: false });
 
   const all = listQuery.data ?? [];
 
   const reviewCount = (o: Onboarding) => o.documents?.filter((d) => d.needsReview).length ?? 0;
+  const myPending = (o: Onboarding) =>
+    myOwner && o.status !== 'COMPLETED'
+      ? (o.checklist ?? []).filter((i) => i.owner === myOwner && !i.done).length
+      : 0;
+  const mineCount = all.filter((o) => myPending(o) > 0).length;
   const visible = all.filter((o) => {
+    if (filter === 'mine') return myPending(o) > 0;
     if (filter === 'done') return o.status === 'COMPLETED';
     if (filter === 'review') return reviewCount(o) > 0;
     return o.status !== 'COMPLETED';
@@ -367,6 +466,11 @@ export function OnboardingPage() {
         <span className="u-flex-gap-8">
           <span className="hf-primary hf-ellipsis">{o.application.candidate.name}</span>
           {reviewCount(o) > 0 && <span className="hf-dot hf-dot--alert" title="有材料待人工核对" />}
+          {myPending(o) > 0 && (
+            <span className="hf-tag hf-tag--warn" title={`${OWNER_LABEL[myOwner!]}还有 ${myPending(o)} 项未完成`}>
+              待我 {myPending(o)}
+            </span>
+          )}
         </span>
       ),
     },
@@ -447,7 +551,7 @@ export function OnboardingPage() {
       render: (_, o) => (
         // 入职单没有独立的可编辑业务字段：清单勾选、材料上传、合同生成都在详情弹窗里完成，
         // 所以这里只给一个入口，不去凑一个指向同一处的「编辑」按钮
-        <span className="hf-link" onClick={() => setSelected(o.id)}>
+        <span className="hf-link" {...pressable(() => openSelected(o.id))}>
           查看 / 办理
         </span>
       ),
@@ -490,13 +594,18 @@ export function OnboardingPage() {
       <div className="hf-bar">
         <div className="hf-bar-left">
           <div className="hf-seg">
-            <span className={filter === 'active' ? 'hf-seg--on' : undefined} onClick={() => setFilter('active')}>
+            {myOwner && (
+              <span className={filter === 'mine' ? 'hf-seg--on' : undefined} {...pressable(() => setFilter('mine'))}>
+                我的待办{mineCount > 0 ? ` ${mineCount}` : ''}
+              </span>
+            )}
+            <span className={filter === 'active' ? 'hf-seg--on' : undefined} {...pressable(() => setFilter('active'))}>
               进行中
             </span>
-            <span className={filter === 'done' ? 'hf-seg--on' : undefined} onClick={() => setFilter('done')}>
+            <span className={filter === 'done' ? 'hf-seg--on' : undefined} {...pressable(() => setFilter('done'))}>
               已完成
             </span>
-            <span className={filter === 'review' ? 'hf-seg--on' : undefined} onClick={() => setFilter('review')}>
+            <span className={filter === 'review' ? 'hf-seg--on' : undefined} {...pressable(() => setFilter('review'))}>
               待核对材料
             </span>
           </div>
@@ -528,8 +637,14 @@ export function OnboardingPage() {
                 <IdcardOutlined />
               </div>
               <div>
-                <div className="hf-state-title">没有符合条件的入职单</div>
-                <div className="hf-state-desc">候选人接受 Offer 后会自动生成入职单，并在这里跟踪三方清单与合同。</div>
+                <div className="hf-state-title">
+                  {filter === 'mine' ? '你负责的待办都已完成' : '没有符合条件的入职单'}
+                </div>
+                <div className="hf-state-desc">
+                  {filter === 'mine'
+                    ? '有新员工接受 Offer 或签署合同时会通知你。'
+                    : '候选人接受 Offer 后会自动生成入职单，并在这里跟踪三方清单与合同。'}
+                </div>
               </div>
             </div>
           ) : (
@@ -565,7 +680,7 @@ export function OnboardingPage() {
         className="hf-modal hf-modal--wide"
         title="入职办理"
         open={Boolean(selected)}
-        onCancel={() => setSelected(null)}
+        onCancel={closeSelected}
         footer={null}
         width={720}
         destroyOnHidden

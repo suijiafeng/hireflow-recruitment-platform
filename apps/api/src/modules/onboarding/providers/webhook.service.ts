@@ -38,7 +38,7 @@ export class WebhookService {
     } else {
       this.logger.log(`Webhook ${event}（未配置 ONBOARDING_WEBHOOK_URL，仅留痕）`);
     }
-    await this.activityLog.record(actor, ACTIVITY_ACTIONS.WEBHOOK_FIRED, 'Application', entityId, {
+    await this.activityLog.recordAuto(actor, ACTIVITY_ACTIONS.WEBHOOK_FIRED, 'Application', entityId, {
       event,
       delivered,
       configured: Boolean(this.url),

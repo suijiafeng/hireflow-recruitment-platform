@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { PortalLinkDto } from '../../common/dto/portal-link.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSIONS } from '@hireflow/shared';
@@ -68,8 +69,8 @@ export class OnboardingController {
   @Post('onboardings/:id/portal-link')
   @RequirePermissions(PERMISSIONS.ONBOARDING_MANAGE)
   @ApiOperation({ summary: '获取/补发新员工门户令牌（前端拼 /portal/onboarding/:token）' })
-  async portalLink(@Param('id') id: string) {
-    return { token: await this.onboardingService.ensurePortalToken(id) };
+  async portalLink(@Param('id') id: string, @Body() dto: PortalLinkDto, @CurrentUser() user: JwtUser) {
+    return { token: await this.onboardingService.ensurePortalToken(id, user, dto.rotate === true) };
   }
 
   @Post('onboardings/:id/contract')
@@ -88,8 +89,8 @@ export class OnboardingController {
 
   @Post('contracts/:id/sign')
   @RequirePermissions(PERMISSIONS.ONBOARDING_MANAGE)
-  @ApiOperation({ summary: '完成签署（HR 代签 mock；新员工自签走门户）' })
+  @ApiOperation({ summary: '完成签署（模拟电子签回调，生产默认关闭；新员工自签走门户）' })
   signContract(@Param('id') id: string, @CurrentUser() user: JwtUser) {
-    return this.onboardingService.signContract(id, user);
+    return this.onboardingService.signContractByStaff(id, user);
   }
 }

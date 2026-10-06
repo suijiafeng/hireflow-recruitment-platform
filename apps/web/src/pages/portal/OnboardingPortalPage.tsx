@@ -7,16 +7,25 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CONTRACT_SIGN_STATUS_LABEL, DOCUMENT_TYPE_META, type ContractSignStatus } from '@hireflow/shared';
-import { App, Button, Form, Input, Modal, Result, Select, Spin, Upload } from 'antd';
+import {
+  CONTRACT_SIGN_STATUS_LABEL,
+  DOCUMENT_FIELD_LABEL,
+  DOCUMENT_TYPE_META,
+  type ContractSignStatus,
+} from '@hireflow/shared';
+import { App, Button, Form, Input, Result, Select, Spin, Upload } from 'antd';
 import dayjs from 'dayjs';
 import type { CSSProperties } from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { portalApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import type { ChecklistItem } from '../../api/types';
 import { PortalShell } from './InterviewPortalPage';
+import { ContractText } from '../../components/ContractText';
+import { FormModal } from '../../components/FormModal';
+import { pressable } from '../../utils/pressable';
+import { prepareUpload } from '../../utils/prepareUpload';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -27,7 +36,25 @@ const OWNER_LABEL: Record<ChecklistItem['owner'], string> = {
 };
 
 /** 清单项状态：待办 / 已完成 / HR 核对中 */
-function ItemRow({ label, done, review, at }: { label: string; done: boolean; review?: boolean; at?: string | null }) {
+/** 清单项 → 对应的证件类型（「签署劳动合同」不对应证件，单独处理） */
+const DOC_TYPE_BY_ITEM: Record<string, string> = Object.fromEntries(
+  Object.entries(DOCUMENT_TYPE_META).map(([type, meta]) => [meta.checklistKey, type]),
+);
+
+function ItemRow({
+  label,
+  done,
+  review,
+  at,
+  action,
+}: {
+  label: string;
+  done: boolean;
+  review?: boolean;
+  at?: string | null;
+  /** 未完成项的入口：有就渲染成可点的「去填写」，没有就给出等待说明 */
+  action?: { text: string; onPress?: () => void };
+}) {
   return (
     <div className="hf-check-row">
       <span className={done ? 'hf-check hf-check--on' : review ? 'hf-check hf-check--review' : 'hf-check'}>
@@ -38,8 +65,12 @@ function ItemRow({ label, done, review, at }: { label: string; done: boolean; re
         <span className="hf-state--warn hf-review-note">HR 核对中</span>
       ) : done ? (
         at && <span className="hf-check-at">{dayjs(at).format('MM-DD HH:mm')}</span>
+      ) : action?.onPress ? (
+        <span className="hf-link" {...pressable(action.onPress)}>
+          {action.text}
+        </span>
       ) : (
-        <span className="hf-link">待填写</span>
+        <span className="hf-faint">{action?.text ?? '待完成'}</span>
       )}
     </div>
   );
@@ -51,8 +82,19 @@ export function OnboardingPortalPage() {
   const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
   const [docOpen, setDocOpen] = useState(false);
+  /** 打开上传弹窗时预选的材料类型（从清单项点进来时） */
+  const [docPreset, setDocPreset] = useState<string | undefined>();
+  const openDoc = (type?: string) => {
+    setDocPreset(type);
+    setDocOpen(true);
+  };
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docForm] = Form.useForm<{ type: string; rawText?: string }>();
+  // 每次打开都显式写入预选类型：表单实例常驻，initialValues 只在首次挂载时生效，
+  // 否则第二次从「银行卡」点进来仍预选上一次的「身份证」，用户一提交就把已识别的身份证覆盖掉
+  useEffect(() => {
+    if (docOpen) docForm.setFieldsValue({ type: docPreset });
+  }, [docOpen, docPreset, docForm]);
 
   const viewQuery = useQuery({
     queryKey: ['portal-onboarding', token],
@@ -87,6 +129,32 @@ export function OnboardingPortalPage() {
 
   const view = viewQuery.data;
 
+  // 「已阅读合同条款」必须真的能读到：确认框里放全文，读完再签
+  const confirmSign = () =>
+    modal.confirm({
+      title: '阅读并签署劳动合同',
+      width: 560,
+      icon: null,
+      content: (
+        <>
+          <ContractText variables={view?.contract?.variables} />
+          <div className="hf-faint u-mt-8">点击「我已阅读，确认签署」即表示同意以上条款，电子签署具有法律效力。</div>
+        </>
+      ),
+      okText: '我已阅读，确认签署',
+      cancelText: '稍后再签',
+      onOk: () => signMutation.mutateAsync(),
+    });
+
+  const showContract = () =>
+    modal.info({
+      title: '劳动合同全文',
+      width: 560,
+      icon: null,
+      content: <ContractText variables={view?.contract?.variables} />,
+      okText: '关闭',
+    });
+
   if (viewQuery.isLoading)
     return (
       <PortalShell title="正在加载…">
@@ -111,7 +179,8 @@ export function OnboardingPortalPage() {
   const companyItems = view.checklist.filter((i) => i.owner !== 'NEW_HIRE');
   const submittedTypes = new Set(view.documents.map((d) => d.type));
   const pct = Math.round((view.progress.done / view.progress.total) * 100);
-  const nextTodo = myItems.find((i) => !i.done);
+  /** 还有没交的证件：合同待签时也要能继续上传，两个入口并存 */
+  const nextDocTodo = myItems.find((i) => !i.done && DOC_TYPE_BY_ITEM[i.key]);
   const contract = view.contract;
   const reviewing = view.documents.filter((d) => d.needsReview).length;
   const done = view.status === 'COMPLETED';
@@ -126,26 +195,21 @@ export function OnboardingPortalPage() {
           <div className="hf-portal-legal">期待您的到来 · 免登录安全链接，请勿转发他人</div>
         ) : (
           <>
-            {contract?.signStatus === 'SENT' ? (
-              <Button
-                type="primary"
-                block
-                icon={<EditOutlined />}
-                loading={signMutation.isPending}
-                onClick={() =>
-                  modal.confirm({
-                    title: '确认签署劳动合同？',
-                    content: '请确认已阅读合同条款，签署后具有法律效力。',
-                    okText: '确认签署',
-                    onOk: () => signMutation.mutateAsync(),
-                  })
-                }
-              >
+            {contract?.signStatus === 'SENT' && (
+              <Button type="primary" block icon={<EditOutlined />} loading={signMutation.isPending} onClick={confirmSign}>
                 签署劳动合同
               </Button>
-            ) : (
-              <Button type="primary" block icon={<PlusOutlined />} onClick={() => setDocOpen(true)}>
-                {nextTodo ? `继续：${nextTodo.label}` : '提交证件材料'}
+            )}
+            {(contract?.signStatus !== 'SENT' || nextDocTodo) && (
+              <Button
+                // 还有证件没交 → 主按钮；证件已齐 → 次要按钮，仅用于补充 / 更正
+                type={nextDocTodo && contract?.signStatus !== 'SENT' ? 'primary' : 'default'}
+                block
+                icon={<PlusOutlined />}
+                className={contract?.signStatus === 'SENT' ? 'u-mt-8' : undefined}
+                onClick={() => openDoc(nextDocTodo ? DOC_TYPE_BY_ITEM[nextDocTodo.key] : undefined)}
+              >
+                {nextDocTodo ? `继续：${nextDocTodo.label}` : '补充或更新证件材料'}
               </Button>
             )}
             <div className="hf-portal-legal">进度自动保存，可随时关闭后再回来</div>
@@ -178,9 +242,15 @@ export function OnboardingPortalPage() {
 
       {/* 需要您完成 */}
       <div className="hf-caption u-mb-4">需要您完成</div>
-      {myItems.map((item) => (
-        <ItemRow key={item.key} label={item.label} done={item.done} at={item.doneAt} />
-      ))}
+      {myItems.map((item) => {
+        const docType = DOC_TYPE_BY_ITEM[item.key];
+        const action = docType
+          ? { text: '去上传', onPress: () => openDoc(docType) }
+          : contract?.signStatus === 'SENT'
+            ? { text: '去签署', onPress: confirmSign }
+            : { text: '等待 HR 发送合同' };
+        return <ItemRow key={item.key} label={item.label} done={item.done} at={item.doneAt} action={action} />;
+      })}
 
       {/* 已提交材料：识别结果供核对 */}
       {view.documents.length > 0 && (
@@ -201,7 +271,7 @@ export function OnboardingPortalPage() {
                 <>
                   {Object.entries(doc.fields).map(([k, v]) => (
                     <div className="hf-check-row hf-check-row--static" key={k}>
-                      <span className="hf-muted hf-field-key hf-field-key--sm">{k}</span>
+                      <span className="hf-muted hf-field-key hf-field-key--sm">{DOCUMENT_FIELD_LABEL[k] ?? k}</span>
                       <span className="hf-check-label">{v}</span>
                     </div>
                   ))}
@@ -221,7 +291,11 @@ export function OnboardingPortalPage() {
       </div>
       {!contract ? (
         <div className="hf-notice hf-notice--flat">
-          <span>合同尚未生成，请先完成材料提交，HR 确认后会发起签署。</span>
+          <span>
+            {nextDocTodo
+              ? '合同尚未生成，请先完成材料提交，HR 确认后会发起签署。'
+              : '材料已提交齐全，HR 确认后会生成合同并发起签署，届时可在此在线签署。'}
+          </span>
         </div>
       ) : (
         <>
@@ -247,12 +321,21 @@ export function OnboardingPortalPage() {
               </span>
             </div>
           )}
+          {Boolean(contract.variables?.startDate) && (
+            <div className="hf-check-row hf-check-row--static">
+              <span className="hf-muted hf-field-key hf-field-key--sm">入职日期</span>
+              <span className="hf-check-label hf-td--num">{String(contract.variables?.startDate)}</span>
+            </div>
+          )}
           {contract.evidenceNo && (
             <div className="hf-check-row hf-check-row--static">
               <span className="hf-muted hf-field-key hf-field-key--sm">存证号</span>
               <span className="hf-check-label hf-mono hf-td--num">{contract.evidenceNo}</span>
             </div>
           )}
+          <Button block className="hf-portal-action u-mt-8" onClick={showContract}>
+            查看合同全文
+          </Button>
         </>
       )}
 
@@ -266,19 +349,24 @@ export function OnboardingPortalPage() {
         </div>
       ))}
 
-      <Modal
+      <FormModal form={docForm}
         className="hf-modal"
         title="提交证件材料"
         open={docOpen}
         onCancel={() => {
           setDocOpen(false);
           setDocFile(null);
+          docForm.resetFields();
         }}
         onOk={() => docForm.submit()}
         confirmLoading={addDocMutation.isPending}
         destroyOnHidden
       >
-        <Form form={docForm} layout="vertical" onFinish={(values) => addDocMutation.mutate(values)}>
+        <Form
+          form={docForm}
+          layout="vertical"
+          onFinish={(values) => addDocMutation.mutate(values)}
+        >
           <Form.Item name="type" label="材料类型" rules={[{ required: true, message: '请选择类型' }]}>
             <Select
               placeholder="选择材料类型"
@@ -292,8 +380,16 @@ export function OnboardingPortalPage() {
             <Upload
               accept="image/*"
               maxCount={1}
+              // 受控文件列表 + 上传前处理（大图压缩、超限拦截）：列表里显示的就是实际要传的文件
+              fileList={docFile ? [{ uid: 'picked', name: docFile.name, status: 'done' as const }] : []}
               beforeUpload={(file) => {
-                setDocFile(file as unknown as File);
+                void prepareUpload(file as unknown as File).then((r) => {
+                  if (r.ok) setDocFile(r.file);
+                  else {
+                    setDocFile(null);
+                    message.error(r.reason);
+                  }
+                });
                 return false;
               }}
               onRemove={() => setDocFile(null)}
@@ -312,7 +408,7 @@ export function OnboardingPortalPage() {
             <Input.TextArea rows={4} placeholder="如：姓名：杨帆 公民身份号码 110105199305124533 住址：…" />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
     </PortalShell>
   );
 }

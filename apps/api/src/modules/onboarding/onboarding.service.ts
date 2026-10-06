@@ -46,12 +46,19 @@ interface DocumentRecord {
   needsReview?: boolean; // 未识别出字段（如只传图片）：待人工核对，不自动勾选待办
 }
 
+/** 证件里的号码类字段：无 onboarding:manage 的内部用户只看尾号 */
+const SENSITIVE_DOC_FIELDS = new Set(['idNumber', 'cardNumber', 'address', 'birth']);
+const maskTail = (v: string) => (v.length > 4 ? `${'*'.repeat(Math.min(v.length - 4, 12))}${v.slice(-4)}` : '****');
+
+/** 入职闭环后门户链接的宽限期 */
+const PORTAL_GRACE_AFTER_COMPLETION_MS = 7 * 24 * 3600 * 1000;
+
 const ONBOARDING_INCLUDE = {
   application: {
     select: {
       id: true,
       candidate: { select: { id: true, name: true, phone: true, email: true } },
-      job: { select: { id: true, title: true, department: { select: { name: true } } } },
+      job: { select: { id: true, title: true, departmentId: true, department: { select: { name: true } } } },
     },
   },
   contract: true,
@@ -92,7 +99,7 @@ export class OnboardingService {
       },
       include: ONBOARDING_INCLUDE,
     });
-    await this.activityLog.record(user, ACTIVITY_ACTIONS.ONBOARDING_CREATED, 'Application', applicationId, {
+    await this.activityLog.recordAuto(user, ACTIVITY_ACTIONS.ONBOARDING_CREATED, 'Application', applicationId, {
       candidate: onboarding.application.candidate.name,
       checklistCount: checklist.length,
     });
@@ -130,6 +137,56 @@ export class OnboardingService {
     };
   }
 
+  /**
+   * 后台视图统一脱敏：
+   * - portalToken 一律不下发。它是新员工门户的唯一凭证，持有者可免登录签合同、传材料，
+   *   且门户视图不做薪资脱敏；需要链接时走 POST /onboardings/:id/portal-link（onboarding:manage）。
+   * - 有 candidate:read 但无 onboarding:manage 的（用人经理）：证件号码只留尾号，原件不下发。
+   * - 无 candidate:read 的角色（IT/行政）只需要姓名来开账号配设备：
+   *   隐去候选人联系方式与证件识别字段、原件链接。fields 置空对象而非删除，前端按对象渲染；
+   *   redacted 标记让前端区分「字段被隐藏」与「OCR 没识别出字段」，否则 IT 会看到误导性的「请人工核对」。
+   */
+  private redactForViewer<
+    T extends {
+      portalToken?: string | null;
+      documents: Prisma.JsonValue;
+      application: { candidate: { phone?: string | null; email?: string | null } };
+    },
+  >(onboarding: T, user?: JwtUser): Omit<T, 'portalToken'> {
+    const { portalToken: _token, ...rest } = onboarding;
+    if (!user || user.permissions.includes(PERMISSIONS.ONBOARDING_MANAGE)) return rest;
+    const docs = (rest.documents as unknown as Array<DocumentRecord & { fileUrl?: string | null }> | null) ?? [];
+    if (user.permissions.includes(PERMISSIONS.CANDIDATE_READ)) {
+      // 用人经理：能看到人来了、交了什么，但证件号码只留尾号——办入职用证件的是 HR
+      return {
+        ...rest,
+        documents: docs.map((d) => ({
+          ...d,
+          fields: Object.fromEntries(
+            Object.entries(d.fields ?? {}).map(([k, v]) => [k, SENSITIVE_DOC_FIELDS.has(k) ? maskTail(v) : v]),
+          ),
+          fileUrl: null,
+          fileKey: null,
+        })) as unknown as Prisma.JsonValue,
+      };
+    }
+    return {
+      ...rest,
+      application: {
+        ...rest.application,
+        candidate: { ...rest.application.candidate, phone: null, email: null },
+      },
+      documents: docs.map((d) => ({
+        ...d,
+        fields: {},
+        fileKey: null,
+        fileName: null,
+        fileUrl: null,
+        redacted: true,
+      })) as unknown as Prisma.JsonValue,
+    };
+  }
+
   /** 材料列表补预签名预览链接（原件在对象存储；无文件/存储不可用时 fileUrl=null） */
   private async withDocUrls<T extends { documents: Prisma.JsonValue }>(onboarding: T): Promise<T> {
     const docs = (onboarding.documents as unknown as DocumentRecord[] | null) ?? [];
@@ -146,13 +203,13 @@ export class OnboardingService {
     // 数据行级权限：用人经理仅本部门职位的入职单
     const deptScope = user ? departmentScopeOf(user) : null;
     const items = await this.prisma.onboarding.findMany({
-      where: deptScope ? { application: { job: { departmentId: deptScope } } } : undefined,
+      where: deptScope ? { application: { job: { departmentId: { in: deptScope } } } } : undefined,
       include: ONBOARDING_INCLUDE,
       orderBy: { updatedAt: 'desc' },
     });
     return Promise.all(
       items.map(async (o) => ({
-        ...(await this.withDocUrls(this.maskContractSalary(o, user))),
+        ...this.redactForViewer(await this.withDocUrls(this.maskContractSalary(o, user)), user),
         progress: this.progressOf(o.checklist),
       })),
     );
@@ -168,13 +225,13 @@ export class OnboardingService {
     const deptScope = user ? departmentScopeOf(user) : null;
     if (deptScope) {
       const owned = await this.prisma.job.findFirst({
-        where: { id: onboarding.application.job.id, departmentId: deptScope },
+        where: { id: onboarding.application.job.id, departmentId: { in: deptScope } },
         select: { id: true },
       });
       if (!owned) throw new ForbiddenException('仅可查看本部门的入职单（数据范围：本部门）');
     }
     return {
-      ...(await this.withDocUrls(this.maskContractSalary(onboarding, user))),
+      ...this.redactForViewer(await this.withDocUrls(this.maskContractSalary(onboarding, user)), user),
       progress: this.progressOf(onboarding.checklist),
     };
   }
@@ -260,17 +317,37 @@ export class OnboardingService {
 
     if (needsReview) {
       // 低置信度不自动流转，强提示 HR 人工核对
-      await this.notifications.pushToRole(
-        RoleCode.HR,
+      await this.notifications.pushByPermission(
+        PERMISSIONS.ONBOARDING_MANAGE,
+        onboarding.application.job.departmentId,
         `入职材料待人工核对：${onboarding.application.candidate.name}`,
         `「${meta.label}」仅上传了图片、未识别出字段，请核对后手动勾选对应待办`,
-        '/onboarding',
+        `/onboarding?onboarding=${onboarding.id}`,
       );
     } else {
       // 自动化：材料入档即勾选对应新员工待办
+      const wasComplete = this.documentsComplete(onboarding.checklist);
       await this.toggleItem(id, meta.checklistKey, true, user);
+      const after = await this.prisma.onboarding.findUniqueOrThrow({ where: { id }, select: { checklist: true } });
+      // 只在「刚好交齐」那一次提醒：门户上告诉新员工「HR 确认后会生成合同」，HR 得知道该动手了
+      if (!wasComplete && this.documentsComplete(after.checklist) && !onboarding.contract) {
+        await this.notifications.pushByPermission(
+          PERMISSIONS.ONBOARDING_MANAGE,
+          onboarding.application.job.departmentId,
+          `入职材料已交齐：${onboarding.application.candidate.name}`,
+          `${onboarding.application.job.title} · 请核对材料并生成劳动合同`,
+          `/onboarding?onboarding=${onboarding.id}`,
+        );
+      }
     }
     return this.get(id, user);
+  }
+
+  /** 证件类材料（身份证 / 银行卡 / 学历）对应的新员工待办是否都已完成 */
+  private documentsComplete(checklist: Prisma.JsonValue): boolean {
+    const keys = new Set<string>(Object.values(DOCUMENT_TYPE_META).map((m) => m.checklistKey));
+    const items = ((checklist as unknown as ChecklistItem[] | null) ?? []).filter((i) => keys.has(i.key));
+    return items.length > 0 && items.every((i) => i.done);
   }
 
   /** 生成劳动合同：模板变量自动填充 */
@@ -292,6 +369,7 @@ export class OnboardingService {
       salaryBase: salary?.base ?? null,
       bonusMonths: salary?.bonusMonths ?? 0,
       probationMonths: 3,
+      startDate: application.offer?.startDate?.toISOString().slice(0, 10) ?? null,
       // 部署环境（容器）默认 UTC，直接切 toISOString 在北京时间 00:00-08:00 会错算成前一天
       signDate: new Date(Date.now() + CN_TZ_OFFSET_MS).toISOString().slice(0, 10),
     };
@@ -332,6 +410,14 @@ export class OnboardingService {
       contract.onboarding.applicationId,
       { provider: this.esign.name, providerRef },
     );
+    // 新员工没有站内账号：真实电子签服务商会自己发短信 / 邮件；这里额外抛事件给外部渠道，
+    // 前端在发送成功后提示 HR 把门户链接转给新员工
+    await this.webhook.fire(
+      'contract.sent',
+      contract.onboarding.applicationId,
+      { provider: this.esign.name, providerRef },
+      user,
+    );
     return this.get(contract.onboardingId, user);
   }
 
@@ -366,7 +452,7 @@ export class OnboardingService {
     // 自动化：通知 IT 准备设备、开通邮箱与 IM 账号
     const candidate = await this.prisma.application.findUniqueOrThrow({
       where: { id: applicationId },
-      include: { candidate: { select: { name: true } }, job: { select: { title: true } } },
+      include: { candidate: { select: { name: true } }, job: { select: { title: true, departmentId: true } } },
     });
     await this.webhook.fire(
       'contract.signed',
@@ -379,7 +465,42 @@ export class OnboardingService {
       },
       user,
     );
+    const link = `/onboarding?onboarding=${contract.onboardingId}`;
+    await this.notifications.pushByPermission(
+      PERMISSIONS.ONBOARDING_MANAGE,
+      candidate.job.departmentId,
+      `劳动合同已签署：${candidate.candidate.name}`,
+      `${candidate.job.title} · 存证号 ${evidenceNo}`,
+      link,
+    );
+    const after = await this.prisma.onboarding.findUniqueOrThrow({
+      where: { id: contract.onboardingId },
+      select: { checklist: true },
+    });
+    const itPending = ((after.checklist as unknown as ChecklistItem[] | null) ?? []).filter(
+      (i) => i.owner === 'IT' && !i.done,
+    );
+    if (itPending.length > 0) {
+      await this.notifications.pushToRole(
+        RoleCode.IT_SUPPORT,
+        `合同已签署，请准备入职：${candidate.candidate.name}`,
+        `${candidate.job.title} · 待办：${itPending.map((i) => i.label).join('、')}`,
+        link,
+      );
+    }
     return this.get(contract.onboardingId, user);
+  }
+
+  /**
+   * 后台「完成签署」：仅用于模拟电子签回调。劳动合同必须由新员工本人签署，
+   * 生产环境默认关闭；接入真实服务商后签署结果走其回调，不经过这里。
+   * 若确需在生产保留（如线下纸质签署后补录），显式设置 ESIGN_STAFF_SIGN=true，操作人照常留痕。
+   */
+  async signContractByStaff(contractId: string, user: JwtUser) {
+    if (process.env.NODE_ENV === 'production' && process.env.ESIGN_STAFF_SIGN !== 'true') {
+      throw new ForbiddenException('劳动合同需由新员工本人在门户签署');
+    }
+    return this.signContract(contractId, user);
   }
 
   /** 清单全部完成 + 合同已签署 → 入职闭环：HIRED + 移入「已入职」 */
@@ -402,7 +523,31 @@ export class OnboardingService {
       }),
     ]);
     await this.applications.moveToStageByName(onboarding.applicationId, '已入职', user);
-    await this.activityLog.record(user, ACTIVITY_ACTIONS.ONBOARDING_COMPLETED, 'Application', onboarding.applicationId, {});
+    await this.activityLog.recordAuto(user, ACTIVITY_ACTIONS.ONBOARDING_COMPLETED, 'Application', onboarding.applicationId);
+
+    const application = await this.prisma.application.findUniqueOrThrow({
+      where: { id: onboarding.applicationId },
+      select: { jobId: true, candidate: { select: { name: true } }, job: { select: { title: true, departmentId: true } } },
+    });
+    const title = `入职已完成：${application.candidate.name}`;
+    const body = `${application.job.title} · 三方待办全部完成，合同已签署`;
+    const link = `/onboarding?onboarding=${id}`;
+    const itUsers = await this.prisma.user.findMany({
+      where: { status: 'ACTIVE', roles: { some: { role: { code: RoleCode.IT_SUPPORT } } } },
+      select: { id: true },
+    });
+    const recipients = new Set([
+      ...(await this.notifications.jobManagerIds(application.jobId)),
+      ...(await this.notifications.recipientsByPermission(PERMISSIONS.ONBOARDING_MANAGE, application.job.departmentId)),
+      ...itUsers.map((u) => u.id),
+    ]);
+    // 最后一步是谁点的，谁就已经知道了
+    await this.notifications.push(
+      [...recipients].filter((uid) => uid !== user.sub),
+      title,
+      body,
+      link,
+    );
   }
 
   private static readonly ROLE_TOGGLE_OWNER: Partial<Record<string, ChecklistItem['owner']>> = {
@@ -424,15 +569,25 @@ export class OnboardingService {
   // ---------- 新员工免登录门户（H5 资料收集 + 电子签） ----------
 
   /** 确保入职单有门户令牌（老数据补发），返回令牌供前端拼 /portal/onboarding/:token */
-  async ensurePortalToken(id: string): Promise<string> {
+  async ensurePortalToken(id: string, user: JwtUser, rotate = false): Promise<string> {
     const onboarding = await this.prisma.onboarding.findUnique({
       where: { id },
-      select: { id: true, portalToken: true },
+      select: { id: true, portalToken: true, status: true, applicationId: true, application: { select: { candidate: { select: { name: true } } } } },
     });
     if (!onboarding) throw new NotFoundException('入职单不存在');
-    if (onboarding.portalToken) return onboarding.portalToken;
+    if (onboarding.status === 'COMPLETED') {
+      throw new BadRequestException('入职已闭环，门户链接不再发放');
+    }
+    if (onboarding.portalToken && !rotate) return onboarding.portalToken;
+    // rotate：重新生成令牌，旧链接立即失效（误发、疑似泄露时用）
     const token = newPortalToken();
     await this.prisma.onboarding.update({ where: { id }, data: { portalToken: token } });
+    if (rotate) {
+      await this.activityLog.record(user, ACTIVITY_ACTIONS.PORTAL_LINK_ROTATED, 'Application', onboarding.applicationId, {
+        candidate: onboarding.application.candidate.name,
+        portal: 'onboarding',
+      });
+    }
     return token;
   }
 
@@ -504,6 +659,14 @@ export class OnboardingService {
       include: ONBOARDING_INCLUDE,
     });
     if (!onboarding) throw new NotFoundException('链接无效或已失效，请联系 HR');
+    // 门户视图含未脱敏的薪资与证件信息：闭环后只保留短暂宽限期（让刚签完合同的人看到完成页），过期即失效。
+    // 闭环后入职单不再允许修改，updatedAt 即闭环时间
+    if (
+      onboarding.status === 'COMPLETED' &&
+      Date.now() - onboarding.updatedAt.getTime() > PORTAL_GRACE_AFTER_COMPLETION_MS
+    ) {
+      throw new NotFoundException('入职流程已完成，链接已失效。如需合同副本请联系 HR');
+    }
     return onboarding;
   }
 
