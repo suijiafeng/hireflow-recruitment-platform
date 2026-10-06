@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "oxlint ."
+    "lint": "oxlint --react-plugin -D react/rules-of-hooks ."
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",

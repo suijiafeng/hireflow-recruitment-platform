@@ -33,7 +33,8 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ConfigProvider locale={zhCN} theme={buildTheme(disableMotion)}>
+    {/* 点遮罩不关闭弹窗：误触会丢掉已填内容；关闭走取消 / Esc / 右上角，由 FormModal 做未保存确认 */}
+    <ConfigProvider locale={zhCN} theme={buildTheme(disableMotion)} modal={{ mask: { closable: false } }}>
       <AntApp>
         <QueryClientProvider client={queryClient}>
           <RouterProvider router={router} />

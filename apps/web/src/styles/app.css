@@ -11,6 +11,7 @@
      --fs-xs   12px  装饰性文字：角标、表头字母、脚注
    标题与展示型数字不属于正文体系，单列在下面，改动前先想清楚层级。 */
 :root {
+  color-scheme: light; /* 系统深色下表单控件与滚动条按浅色渲染，避免白黑混搭 */
   --fs-base: 16px;
   --fs-sm: 14px;
   --fs-xs: 12px;
@@ -176,6 +177,7 @@
   gap: 12px;
 }
 .u-flex-1 { flex: 1; min-width: 0; }
+.u-nowrap { white-space: nowrap; }
 .w-16 { width: 16px; }
 .w-56 { width: 56px; }
 .w-88 { width: 88px; }
@@ -2754,7 +2756,9 @@
   min-width: 0;
   display: flex;
   gap: 0;
-  overflow: hidden;
+  /* 原为 overflow:hidden——列总宽超出时末列（已入职）被直接裁掉、连滚动条都没有 */
+  overflow-x: auto;
+  overflow-y: hidden;
   background: #fff;
   border: 1px solid #e6e7e9;
   border-radius: 8px;
@@ -2763,7 +2767,8 @@
 .kanban-col {
   flex: 1 1 0;
   width: auto;
-  min-width: 250px;
+  /* 250px × 6 列在 1440 屏放不下；180px 时 1440 可并排，更窄才横向滚动 */
+  min-width: 180px;
   max-height: none;
   background: #fff;
   border: none;
@@ -3735,6 +3740,8 @@
 .hf-modal .ant-modal-body { padding: 16px 20px; max-height: 62vh; overflow-y: auto; }
 .hf-modal .ant-modal-footer { margin: 0; padding: 14px 20px; border-top: 1px solid #eeeff1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .hf-modal-hint { margin-right: auto; font-size: var(--fs-xs); color: rgba(26, 26, 26, 0.4); }
+/* 含 DatePicker / Select 的矮弹窗：body 一滚就会裁掉下拉面板，这类弹窗不限高 */
+.hf-modal--pickers .ant-modal-body { overflow: visible; max-height: none; }
 /* 抽屉：内部一律不再套 Card */
 .hf-drawer .ant-drawer-header { padding: 18px 24px 14px; border-bottom: 1px solid #eeeff1; }
 /* 关闭按钮统一在右上角：antd Drawer 默认把 × 放在标题左侧，和全站 Modal 反着来 */
@@ -3827,9 +3834,10 @@
 .hf-slot-badge {
   min-width: 0;
   max-width: 70%;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: var(--fs-xs);
   color: rgba(26, 26, 26, 0.45);
   background: #f4f5f6;
@@ -3837,6 +3845,8 @@
   padding: 1px 6px;
   cursor: help;
 }
+.hf-slot-badge .hf-ellipsis { min-width: 0; }
+.hf-slot-badge > :last-child { flex-shrink: 0; }
 .hf-slot-badge--link { cursor: pointer; }
 .hf-slot-badge--link:hover { background: #eff6ff; color: #2563eb; }
 .hf-slot-del {
@@ -4426,4 +4436,208 @@
 .hf-atable .ant-pagination .ant-pagination-total-text {
   margin-inline-end: auto;
   color: rgba(26, 26, 26, 0.45);
+}
+
+/* KPI 口径注记：同一排指标范围不同时，标签旁注明「全部职位 / 当前职位」 */
+.kpi-scope {
+  margin-left: 6px;
+  font-size: var(--fs-xs);
+  color: rgba(26, 26, 26, 0.4);
+}
+
+/* 看板：拖动时不能直接放入的列（待入职 / 已入职由业务事件自动流转） */
+.kanban-col--blocked {
+  opacity: 0.55;
+  background: repeating-linear-gradient(135deg, #f5f5f5 0 8px, #ececec 8px 16px);
+}
+.kanban-col-blocked-hint {
+  margin-bottom: 6px;
+  font-size: var(--fs-xs);
+  color: rgba(26, 26, 26, 0.6);
+}
+/* 卡片右上角「移动到…」：鼠标悬停或键盘聚焦时出现，触屏常显 */
+.drag-source { position: relative; }
+.kanban-card-move {
+  /* 放右下角：右上角是匹配分，别挡住 */
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(26, 26, 26, 0.55);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.drag-source:hover .kanban-card-move,
+.drag-source:focus-within .kanban-card-move,
+.kanban-card-move:focus-visible { opacity: 1; }
+.kanban-card-move:hover { color: #2563eb; }
+@media (hover: none) { .kanban-card-move { opacity: 1; } }
+
+/* 手机宽度的后台：头部只留当前页标题与头像，工具条换行，避免标题被挤成一字一行 */
+/* 平板 / 小笔记本：右栏收窄，别把主列表挤成一条 */
+@media (max-width: 1023px) {
+  .hf-rail,
+  .hf-rail--narrow,
+  .hf-rail--wide { width: 300px; }
+}
+
+/* 汉堡按钮默认不渲染，只在手机宽度出现 */
+.mobile-menu-btn { display: none; }
+.mobile-menu .ant-drawer-body { background: #17181a; }
+.mobile-menu .sider-inner { height: 100%; }
+
+@media (max-width: 767px) {
+  /* 侧边栏换成抽屉菜单 */
+  .layout-root > .ant-layout-sider { display: none; }
+  .mobile-menu-btn { display: inline-flex; flex-shrink: 0; margin-left: -8px; }
+  .layout-header { padding: 0 12px; }
+  .layout-content { padding: 12px; }
+
+  /* 右栏（面试可约时段、知识库等）改为纵向排在主内容下方，而不是把列表挤出屏幕 */
+  .hf-cols,
+  .dashboard-cols { flex-direction: column; overflow-y: auto; }
+  .hf-cols > *,
+  .dashboard-cols > * { flex: none; }
+  .hf-rail,
+  .hf-rail--narrow,
+  .hf-rail--wide,
+  .dashboard-side { width: 100%; }
+  .hf-cols > .hf-panel,
+  .hf-cols > .hf-atable,
+  .panel--funnel { min-height: 320px; }
+
+  /* KPI 条：一行五张挤成「待..」，改两列网格 */
+  .hf-kpis,
+  .kpi-strip { flex-wrap: wrap; }
+  .hf-kpi,
+  .kpi-cell {
+    flex: 1 1 50%;
+    min-width: 50%;
+    border-bottom: 1px solid #eeeff1;
+  }
+  .hf-kpi:nth-child(2n),
+  .kpi-cell:nth-child(2n) { border-right: none; }
+  .hf-kpi:nth-last-child(-n + 2),
+  .kpi-cell:nth-last-child(-n + 2) { border-bottom: none; }
+
+  /* 待办条：标签换行，数字和名称各占一行 */
+  .todo-strip { flex-wrap: wrap; height: auto; }
+  .todo-strip-items { flex-wrap: wrap; }
+  .todo-strip-item { flex: 1 1 50%; min-width: 50%; }
+  .todo-strip-label { white-space: normal; }
+
+  /* 面板标题不再被挤成一字一行 */
+  .panel-head,
+  .hf-panel-head { flex-wrap: wrap; row-gap: 6px; }
+  .panel-title,
+  .hf-panel-title { white-space: nowrap; }
+  .dashboard-bar { height: auto; min-height: 56px; flex-wrap: wrap; row-gap: 8px; padding: 8px 12px; }
+  .dashboard-bar .w-260 { width: 100%; }
+  .dashboard-body,
+  .hf-body { padding: 12px; }
+
+  /* 通知面板：bottomRight 会把右边缘对齐到铃铛、左边伸出屏幕；手机上改为贴两侧留 8px */
+  .notif-popover { left: 8px !important; right: 8px; }
+  .notif-popover .ant-popover-inner { width: calc(100vw - 16px); }
+  .notif-popover .ant-popover-arrow { display: none; }
+  .notif-panel { width: auto; }
+
+  /* 候选人抽屉头部：标题与操作按钮分两行，姓名不再被挤出左边界 */
+  .hf-drawer .ant-drawer-header { padding: 12px 16px 10px; }
+  .hf-drawer .ant-drawer-header-title { align-items: flex-start; }
+  .hf-drawer .ant-drawer-title { min-width: 0; flex: 1; }
+  .hf-drawer .ant-drawer-title > .u-flex-between { flex-wrap: wrap; row-gap: 8px; }
+  .hf-drawer .ant-drawer-title .hf-bar-right { width: 100%; flex-wrap: wrap; }
+  .hf-drawer .ant-drawer-body { padding: 12px 16px 16px; }
+  .hf-drawer-tabs { gap: 16px; overflow-x: auto; }
+
+  /* 看板列：手机上窄一点，一屏能看到一列半，提示还能横滑 */
+  .kanban-col { width: 240px; }
+
+  .layout-header { gap: 8px; }
+  .layout-header .ant-breadcrumb { min-width: 0; overflow: hidden; white-space: nowrap; }
+  .layout-header .ant-breadcrumb ol > li:not(:last-child) { display: none; }
+  .header-user .ant-typography,
+  .header-user .ant-tag { display: none; }
+  /* 工具条原本固定 56px 高：换行后第二行会溢出、被下方表格盖住，窄屏改为自适应高度 */
+  .hf-bar { height: auto; min-height: 56px; padding: 8px 12px; }
+  .hf-bar,
+  .hf-bar-left { flex-wrap: wrap; row-gap: 8px; }
+  .hf-bar-left .w-260 { width: 100%; }
+}
+
+/* 从通知 / 待办深链接进来的目标行：短暂高亮，告诉用户「就是这一条」 */
+.ant-table-row.hf-row--deeplink > td { animation: hf-row-deeplink 2.4s ease-out 1; background: #eff6ff; }
+@keyframes hf-row-deeplink {
+  0%, 40% { background: #dbeafe; }
+  100% { background: #eff6ff; }
+}
+
+/* 门户次要操作（联系 HR / 婉拒）：文字样式不变，但点击区域至少 44px 高，手机上点得准 */
+.hf-portal-actions .hf-portal-action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+}
+.hf-portal-actions a.hf-portal-action { color: rgba(26, 26, 26, 0.65); }
+
+/* 劳动合同正文：签署确认框与后台预览共用，长文本内部滚动 */
+.hf-contract-text {
+  max-height: 52vh;
+  overflow-y: auto;
+  padding: 12px 14px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  line-height: 1.7;
+  font-size: var(--fs-sm);
+}
+.hf-contract-text p {
+  margin: 2px 0 10px;
+}
+.hf-contract-title {
+  font-weight: 600;
+}
+
+/* ---------- 走查补丁：键盘焦点、动效偏好、看板横滚提示、1024 待办换行 ---------- */
+
+/* 自绘的可点元素（pressable）默认只有浏览器 1px 细线：统一 2px 外框，和深链接高亮同色 */
+.hf-link:focus-visible,
+.hf-more:focus-visible,
+.hf-seg > span:focus-visible,
+.kanban-card:focus-visible,
+.hf-conclusion [role='radio']:focus-visible,
+.hf-score [role='radio']:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* 系统「减少动态效果」：antd 的动效已在 main.tsx 关闭，这里把自写的关键帧也关掉 */
+@media (prefers-reduced-motion: reduce) {
+  .chat-row,
+  .ant-table-row.hf-row--deeplink > td { animation: none; }
+  .ant-table-row.hf-row--deeplink > td { background: #eff6ff; }
+}
+
+/* 看板横向滚动提示：内容超出一侧时，该侧出现阴影（背景贴着内容滚动，遮罩贴着容器不动） */
+.kanban-board {
+  background:
+    linear-gradient(to right, #f4f5f6 30%, rgba(244, 245, 246, 0)) left / 40px 100% no-repeat,
+    linear-gradient(to left, #f4f5f6 30%, rgba(244, 245, 246, 0)) right / 40px 100% no-repeat,
+    linear-gradient(to right, rgba(26, 26, 26, 0.1), rgba(26, 26, 26, 0)) left / 14px 100% no-repeat,
+    linear-gradient(to left, rgba(26, 26, 26, 0.1), rgba(26, 26, 26, 0)) right / 14px 100% no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
+
+/* 1024 宽下待办一行放不下六项，末项被截断：改为可换行 */
+@media (max-width: 1279px) {
+  .todo-strip { height: auto; }
+  .todo-strip-items { flex-wrap: wrap; }
+  .todo-strip-item { flex: 1 1 33%; min-width: 33%; }
 }
