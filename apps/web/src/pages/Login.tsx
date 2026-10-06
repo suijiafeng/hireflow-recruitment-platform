@@ -1,7 +1,11 @@
 import { EyeInvisibleOutlined, EyeTwoTone, LockOutlined, MailOutlined, RocketOutlined } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
-import { App, Button, Card, Form, Input } from 'antd';
-import { Navigate, useNavigate } from 'react-router';
+import { Alert, App, Button, Card, Form, Input } from 'antd';
+import { Navigate, useNavigate, useSearchParams } from 'react-router';
+import { useState } from 'react';
+import { safeRedirect } from '../utils/redirect';
+import { pressable } from '../utils/pressable';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { authApi } from '../api';
 import { extractErrorMessage } from '../api/client';
 import { useAuthStore } from '../stores/auth';
@@ -19,26 +23,38 @@ const DEV_ACCOUNTS = [
   { email: 'hr@arthr.local', role: 'HR / 招聘专员' },
   { email: 'manager@arthr.local', role: '用人经理' },
   { email: 'interviewer@arthr.local', role: '面试官' },
+  { email: 'it@arthr.local', role: 'IT / 行政' },
 ];
+/**
+ * 是否展示测试账号并预填：开发环境默认展示；构建时 VITE_DEMO_ACCOUNTS=false 可关闭。
+ * 在线演示站需要它，所以生产构建默认仍展示——正式部署请显式关闭。
+ */
+const SHOW_DEMO_ACCOUNTS = import.meta.env.VITE_DEMO_ACCOUNTS !== 'false';
 const DEV_PASSWORD = 'Admin@123456';
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  /** 从受保护页面被带到登录页时，登录后回到原页面 */
+  const redirectTo = safeRedirect(searchParams.get('redirect')) ?? '/';
   const { message } = App.useApp();
   const { token, setAuth } = useAuthStore();
   const [form] = Form.useForm<{ email: string; password: string }>();
+  /** 登录失败的提示放在表单里：顶部一闪而过的 toast 离输入框太远，容易错过 */
+  const [loginError, setLoginError] = useState<string | null>(null);
+  useDocumentTitle('登录 · ART 智能招聘');
 
   const loginMutation = useMutation({
     mutationFn: authApi.login,
     onSuccess: (data) => {
       setAuth(data.accessToken, data.user);
       message.success(`欢迎回来，${data.user.name}`);
-      navigate('/', { replace: true });
+      navigate(redirectTo, { replace: true });
     },
-    onError: (error) => message.error(extractErrorMessage(error, '登录失败')),
+    onError: (error) => setLoginError(extractErrorMessage(error, '登录失败')),
   });
 
-  if (token) return <Navigate to="/" replace />;
+  if (token) return <Navigate to={redirectTo} replace />;
 
   return (
     <div className="login-bg">
@@ -95,10 +111,11 @@ export function LoginPage() {
             layout="vertical"
             requiredMark={false}
             onFinish={(values) => loginMutation.mutate(values)}
-            initialValues={{ email: DEV_ACCOUNTS[0].email, password: DEV_PASSWORD }}
+            onValuesChange={() => setLoginError(null)}
+            initialValues={SHOW_DEMO_ACCOUNTS ? { email: DEV_ACCOUNTS[0].email, password: DEV_PASSWORD } : undefined}
           >
             <Form.Item name="email" label="邮箱" rules={[{ required: true, type: 'email', message: '请输入正确的邮箱' }]}>
-              <Input prefix={<MailOutlined />} placeholder="you@company.com" size="large" autoComplete="username" />
+              <Input prefix={<MailOutlined />} placeholder="you@company.com" size="large" autoComplete="username" autoFocus />
             </Form.Item>
             <Form.Item name="password" label="密码" rules={[{ required: true, min: 6, message: '密码至少 6 位' }]}>
               <Input.Password
@@ -109,11 +126,13 @@ export function LoginPage() {
                 iconRender={(visible) => (visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />)}
               />
             </Form.Item>
+            {loginError && <Alert type="error" showIcon message={loginError} className="u-mb-16" />}
             <Button type="primary" htmlType="submit" block size="large" loading={loginMutation.isPending}>
               登录
             </Button>
           </Form>
 
+          {SHOW_DEMO_ACCOUNTS && (
           <div className="login-tip">
             <div className="login-tip-title">
               <span>开发环境测试账号</span>
@@ -124,7 +143,12 @@ export function LoginPage() {
                 <div
                   className="login-account-row"
                   key={a.email}
-                  onClick={() => form.setFieldsValue({ email: a.email, password: DEV_PASSWORD })}
+                  title="填入该账号；双击直接登录"
+                  {...pressable(() => {
+                    form.setFieldsValue({ email: a.email, password: DEV_PASSWORD });
+                    setLoginError(null);
+                  })}
+                  onDoubleClick={() => loginMutation.mutate({ email: a.email, password: DEV_PASSWORD })}
                 >
                   <span>{a.email}</span>
                   <span className="role">{a.role}</span>
@@ -132,6 +156,7 @@ export function LoginPage() {
               ))}
             </div>
           </div>
+          )}
         </Card>
       </div>
     </div>

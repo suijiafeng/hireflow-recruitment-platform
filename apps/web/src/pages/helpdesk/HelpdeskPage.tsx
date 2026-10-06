@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from 'react';
 import { helpdeskApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import { EmptyBlock } from '../../components/ui';
+import { pressable } from '../../utils/pressable';
 
 interface ChatMessage {
   role: 'user' | 'bot';
@@ -67,7 +68,7 @@ function ChatRow({ msg, onCopy }: { msg: ChatMessage; onCopy: (text: string) => 
               </>
             )}
             <span className="hf-td--num">{dayjs(msg.at).format('HH:mm')}</span>
-            <span className="hf-link" onClick={() => onCopy(msg.text)} title='复制回答'>
+            <span className="hf-link" {...pressable(() => onCopy(msg.text))} title='复制回答'>
               <CopyOutlined  /> 
             </span>
           </div>
@@ -190,7 +191,7 @@ export function HelpdeskPage() {
                 </p>
                 <div className="hf-chip-row">
                   {QUICK_QUESTIONS.map((q) => (
-                    <span key={q} className="hf-chip" onClick={() => ask(q)}>
+                    <span key={q} className="hf-chip" {...pressable(() => ask(q))}>
                       {q}
                     </span>
                   ))}
@@ -218,7 +219,7 @@ export function HelpdeskPage() {
                     </span>
                     <div className="hf-bubble hf-bubble--error">
                       这条没有回答成功，可能是网络或服务波动。
-                      <span className="hf-link u-ml-8" onClick={retry}>
+                      <span className="hf-link u-ml-8" {...pressable(retry)}>
                         重试
                       </span>
                     </div>
@@ -272,7 +273,7 @@ export function HelpdeskPage() {
               </div>
               <div className="hf-chip-row hf-chip-row--pad">
                 {QUICK_QUESTIONS.map((q) => (
-                  <span key={q} className="hf-chip" onClick={() => ask(q)}>
+                  <span key={q} className="hf-chip" {...pressable(() => ask(q))}>
                     {q}
                   </span>
                 ))}
