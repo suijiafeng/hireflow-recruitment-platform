@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ACTIVITY_ACTIONS, PERMISSIONS } from '@hireflow/shared';
-import { departmentScopeOf } from '../../common/data-scope';
+import { pendingScreeningWhere } from '../candidates/candidates.service';
+import { departmentScopeOf, inDepartmentScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
 import { AiService } from '../ai/ai.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -19,18 +20,21 @@ export class AnalyticsService {
    * 看板/候选人/Offer 都按部门收紧，报表若不收紧，同一批数据换个端点就全公司可见
    * （TTH、渠道效能、面试官姓名 + 通过率偏离度都在里面）。
    */
-  private deptScopeOf(user: JwtUser): string | null {
+  private deptScopeOf(user: JwtUser): string[] | null {
     return departmentScopeOf(user);
   }
 
   /** 待办事项聚合 To-Do Center */
   async todos(user: JwtUser) {
     const now = new Date();
-    // 待处理新简历：停留在各职位第一阶段的在途应聘（无 job:read 的角色如 IT/新员工不该看到这个数字）
+    // 用人经理（本部门）：各计数与对应列表页同口径，只算本部门职位；
+    // 否则大盘提示「待审批 1」而录用管理页里一条都找不到
+    const dept = this.deptScopeOf(user);
+    const appScope = dept ? { application: { job: { departmentId: { in: dept } } } } : {};
+    // 待处理新简历：按人计（与候选人列表「待初筛」筛选同口径，点进去看到的人数一致）；
+    // 无 job:read 的角色如 IT/新员工不该看到这个数字
     const newResumes = user.permissions.includes(PERMISSIONS.JOB_READ)
-      ? await this.prisma.application.count({
-          where: { status: 'ACTIVE', stage: { order: 0 }, job: { status: 'OPEN' } },
-        })
+      ? await this.prisma.candidate.count({ where: pendingScreeningWhere(dept) })
       : null;
     // 我的待提交面评：我被指派、面试时间已过、且我尚未提交评价
     const myPendingEvaluations = await this.prisma.interview.count({
@@ -42,16 +46,17 @@ export class AnalyticsService {
       },
     });
     const pendingOffers = user.permissions.includes(PERMISSIONS.OFFER_APPROVE)
-      ? await this.prisma.offer.count({ where: { approvalStatus: 'PENDING' } })
+      ? await this.prisma.offer.count({ where: { approvalStatus: 'PENDING', ...appScope } })
       : null;
     // Offer 双待办：通知会被刷走，待办卡才是工作驱动
     const canInitiate = user.permissions.includes(PERMISSIONS.OFFER_INITIATE);
     const rejectedOffers = canInitiate
-      ? await this.prisma.offer.count({ where: { approvalStatus: 'REJECTED' } })
+      ? await this.prisma.offer.count({ where: { approvalStatus: 'REJECTED', ...appScope } })
       : null;
     const offersDue = canInitiate
       ? await this.prisma.offer.count({
           where: {
+            ...appScope,
             OR: [
               { approvalStatus: 'EXPIRED', extendedOnce: false }, // 已失效可续期
               {
@@ -65,12 +70,13 @@ export class AnalyticsService {
       : null;
     const canReadOnboarding = user.permissions.includes(PERMISSIONS.ONBOARDING_READ);
     const onboardingInProgress = canReadOnboarding
-      ? await this.prisma.onboarding.count({ where: { status: 'IN_PROGRESS' } })
+      ? await this.prisma.onboarding.count({ where: { status: 'IN_PROGRESS', ...appScope } })
       : null;
     // 待人工核对材料（低置信度阻断）：documents 为 JSON 数组，量小直接内存过滤
-    const docsNeedReview = canReadOnboarding
+    // 「材料待核对」是 HR 的活：IT 看不到证件内容，这个数字对他没有意义
+    const docsNeedReview = user.permissions.includes(PERMISSIONS.ONBOARDING_MANAGE)
       ? await this.prisma.onboarding
-          .findMany({ where: { status: 'IN_PROGRESS' }, select: { documents: true } })
+          .findMany({ where: { status: 'IN_PROGRESS', ...appScope }, select: { documents: true } })
           .then((inProgress) =>
             inProgress.reduce((sum, o) => {
               const docs = (o.documents as Array<{ needsReview?: boolean }> | null) ?? [];
@@ -93,8 +99,8 @@ export class AnalyticsService {
   async overview(user: JwtUser) {
     const now = new Date();
     const dept = this.deptScopeOf(user);
-    const jobWhere = dept ? { departmentId: dept } : {};
-    const appJobWhere = dept ? { job: { departmentId: dept } } : {};
+    const jobWhere = dept ? { departmentId: { in: dept } } : {};
+    const appJobWhere = dept ? { job: { departmentId: { in: dept } } } : {};
     const [openJobs, pausedJobs, candidates, upcomingInterviews, hired] = await this.prisma.$transaction([
       this.prisma.job.count({ where: { ...jobWhere, status: 'OPEN' } }),
       this.prisma.job.count({ where: { ...jobWhere, status: 'PAUSED' } }),
@@ -122,7 +128,7 @@ export class AnalyticsService {
     });
     if (!job) throw new NotFoundException('职位不存在');
     // 与看板同规则：用人经理只看本部门职位的漏斗
-    if (dept && job.departmentId !== dept) {
+    if (dept && !inDepartmentScope(dept, job.departmentId)) {
       throw new ForbiddenException('仅可查看本部门职位的漏斗（数据范围：本部门）');
     }
 
@@ -172,8 +178,15 @@ export class AnalyticsService {
         current: counts[i],
         /** 历史上到达过该阶段（含之后阶段）的人数 */
         reached: reached[i],
-        /** 相对上一阶段的转化率（0-1，首阶段为 null） */
-        conversion: i === 0 || reached[i - 1] === 0 ? null : reached[i] / reached[i - 1],
+        /**
+         * 相对上一阶段的转化率（0-1，首阶段为 null）。分母只算上一阶段「已有结果」的人：
+         * 还停在上一阶段的在途者（如 Offer 待审批）既没转化也没流失，算进去会把进行中的流程误判成流失。
+         */
+        conversion: (() => {
+          if (i === 0) return null;
+          const decided = reached[i - 1] - counts[i - 1];
+          return decided > 0 ? Math.min(1, reached[i] / decided) : null;
+        })(),
       })),
     };
   }
@@ -205,14 +218,14 @@ export class AnalyticsService {
     const scopedAppIds = dept
       ? (
           await this.prisma.application.findMany({
-            where: { job: { departmentId: dept } },
+            where: { job: { departmentId: { in: dept } } },
             select: { id: true },
           })
         ).map((a) => a.id)
       : null;
     const [apps, completions] = await Promise.all([
       this.prisma.application.findMany({
-        where: { createdAt: { gte: start }, ...(dept ? { job: { departmentId: dept } } : {}) },
+        where: { createdAt: { gte: start }, ...(dept ? { job: { departmentId: { in: dept } } } : {}) },
         select: { createdAt: true },
       }),
       this.prisma.activityLog.findMany({
@@ -257,7 +270,8 @@ export class AnalyticsService {
     const { range = 'all' } = query;
     // 行级范围优先于查询参数：用人经理传任何 deptId 都被本部门覆盖，不是「默认值」而是上限
     const forcedDept = user ? this.deptScopeOf(user) : null;
-    const deptId = forcedDept ?? query.deptId;
+    // 查询参数是 HR 的单部门筛选；经理的范围是本部门子树
+    const deptIds = forcedDept ?? (query.deptId ? [query.deptId] : null);
 
     const rangeStart = (() => {
       const now = new Date();
@@ -269,7 +283,7 @@ export class AnalyticsService {
 
     const appWhere: Prisma.ApplicationWhereInput = {
       ...(rangeStart ? { createdAt: { gte: rangeStart } } : {}),
-      ...(deptId ? { job: { departmentId: deptId } } : {}),
+      ...(deptIds ? { job: { departmentId: { in: deptIds } } } : {}),
     };
 
     /** 同期群内的应聘；stageStay 需要按 id 反查留痕，顺带复用它的 createdAt */
@@ -413,7 +427,8 @@ export class AnalyticsService {
       /** 回显实际生效的口径与样本量：前端可据此提示「本区间样本过少」而不是干画一张空图 */
       scope: {
         range,
-        deptId: deptId ?? null,
+        // 回显筛选的根部门（经理为本部门；实际统计含其下级部门）
+        deptId: forcedDept ? (user?.departmentId ?? null) : (query.deptId ?? null),
         since: rangeStart?.toISOString() ?? null,
         applications: scopedApps.length,
       },

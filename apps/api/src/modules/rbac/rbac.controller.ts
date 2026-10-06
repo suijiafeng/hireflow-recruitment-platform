@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSIONS } from '@hireflow/shared';
 import { CurrentUser, type JwtUser } from '../../common/decorators/current-user.decorator';
-import { RequirePermissions } from '../../common/decorators/permissions.decorator';
+import { RequireAnyPermission, RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRolePermissionsDto } from './dto/update-role-permissions.dto';
@@ -18,6 +18,8 @@ export class RbacController {
   ) {}
 
   @Get('roles')
+  // 角色矩阵只给系统设置使用者看：成员管理需要选角色，权限配置需要看矩阵
+  @RequireAnyPermission(PERMISSIONS.USER_MANAGE, PERMISSIONS.CONFIG_MANAGE)
   @ApiOperation({ summary: '角色列表（含权限点）' })
   roles() {
     return this.prisma.role.findMany({
@@ -27,6 +29,8 @@ export class RbacController {
   }
 
   @Get('permissions')
+  // 角色矩阵只给系统设置使用者看：成员管理需要选角色，权限配置需要看矩阵
+  @RequireAnyPermission(PERMISSIONS.USER_MANAGE, PERMISSIONS.CONFIG_MANAGE)
   @ApiOperation({ summary: '全部权限点' })
   permissions() {
     return this.prisma.permission.findMany({ orderBy: [{ group: 'asc' }, { code: 'asc' }] });
