@@ -20,6 +20,10 @@ import type {
 } from '../../api/types';
 import { useAuthStore } from '../../stores/auth';
 import { downloadCsv } from '../../utils/csv';
+import { FormModal } from '../../components/FormModal';
+import { useUrlState } from '../../hooks/useUrlState';
+import { pressable } from '../../utils/pressable';
+import { departmentOptions } from '../../utils/departments';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -179,7 +183,7 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
       render: (_, r) => {
         const editable = canManage && r.code !== 'ADMIN';
         return (
-          <span className={editable ? 'hf-link' : 'hf-link--off'} onClick={() => editable && setSelectedId(r.id)}>
+          <span className={editable ? 'hf-link' : 'hf-link--off'} {...pressable(() => editable && setSelectedId(r.id))}>
             编辑
           </span>
         );
@@ -225,7 +229,7 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
       <div className="hf-panel hf-panel--grow">
             <div className="hf-panel-head">
               <span className="hf-panel-title">最近权限变更</span>
-              <span className="hf-link" onClick={onGoAudit}>
+              <span className="hf-link" {...pressable(onGoAudit)}>
                 查看完整审计日志
               </span>
             </div>
@@ -303,9 +307,9 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
                       <span
                         key={d.code}
                         className="hf-perm-item"
-                        onClick={() => {
+                        {...pressable(() => {
                           if (canManage && !isAdmin) toggle(d.code);
-                        }}
+                        })}
                       >
                         <span className={checked ? 'hf-check hf-check--on' : 'hf-check'}>{checked ? '✓' : ''}</span>
                         <span className={checked ? 'hf-check-label' : 'hf-check-label hf-state--off'}>{d.name}</span>
@@ -319,7 +323,7 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
         )}
       </Modal>
 
-      <Modal
+      <FormModal form={createForm}
         className="hf-modal"
         title={
           <>
@@ -376,14 +380,14 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
             />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
     </>
   );
 }
 
 /* ============================================================ 成员管理 */
 function MembersSection() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<UserItem | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
@@ -416,10 +420,36 @@ function MembersSection() {
     setSelected(editing ? editing.roles.map((ur) => ur.role.code) : []);
   }, [editing]);
 
+  const me = useAuthStore((s) => s.user);
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: 'ACTIVE' | 'DISABLED' }) => usersApi.setStatus(id, status),
+    onSuccess: (data, { status }) => {
+      void queryClient.invalidateQueries({ queryKey: ['users'] });
+      void queryClient.invalidateQueries({ queryKey: ['audit'] });
+      if (status === 'ACTIVE') return message.success('账号已启用');
+      // 离职的人手上还挂着职位：审批通知会按兜底规则另找人，但职位本身该换负责人
+      if (data.openJobs.length > 0) {
+        modal.warning({
+          title: '账号已停用，但仍是以下职位的用人经理',
+          content: (
+            <>
+              <div className="u-mb-8">{data.openJobs.map((j) => j.title).join('、')}</div>
+              <div className="hf-muted">请到「职位管理」为这些职位改选在职的用人经理；在此之前相关审批会通知其上级或管理员。</div>
+            </>
+          ),
+          okText: '知道了',
+        });
+      } else {
+        message.success('账号已停用');
+      }
+    },
+    onError: (error) => message.error(extractErrorMessage(error, '操作失败')),
+  });
+
   const saveMutation = useMutation({
     mutationFn: () => usersApi.updateRoles(editing!.id, selected),
     onSuccess: () => {
-      message.success('角色已保存，该账号重新登录后生效');
+      message.success('角色已保存，已即时生效');
       setEditing(null);
       void queryClient.invalidateQueries({ queryKey: ['users'] });
       void queryClient.invalidateQueries({ queryKey: ['roles'] });
@@ -482,8 +512,26 @@ function MembersSection() {
       align: 'right',
       fixed: 'right',
       render: (_, u) => (
-        <span className="hf-link" onClick={() => setEditing(u)}>
-          分配角色
+        <span className="u-flex-end u-flex-gap-12">
+          <span className="hf-link" {...pressable(() => setEditing(u))}>
+            分配角色
+          </span>
+          {u.id !== me?.id &&
+            (u.status === 'ACTIVE' ? (
+              <Popconfirm
+                title={`停用 ${u.name}？`}
+                description="停用后立即无法登录，已登录的会话也会失效；数据与历史留痕保留。"
+                okText="停用"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => statusMutation.mutate({ id: u.id, status: 'DISABLED' })}
+              >
+                <span className="hf-link hf-link--danger">停用</span>
+              </Popconfirm>
+            ) : (
+              <span className="hf-link" {...pressable(() => statusMutation.mutate({ id: u.id, status: 'ACTIVE' }))}>
+                启用
+              </span>
+            ))}
         </span>
       ),
     },
@@ -552,7 +600,7 @@ function MembersSection() {
             <div
               key={r.id}
               className="hf-check-row"
-              onClick={() => setSelected((prev) => (checked ? prev.filter((c) => c !== r.code) : [...prev, r.code]))}
+              {...pressable(() => setSelected((prev) => (checked ? prev.filter((c) => c !== r.code) : [...prev, r.code])))}
             >
               <span className={checked ? 'hf-check hf-check--on' : 'hf-check'}>{checked ? '✓' : ''}</span>
               <span className="hf-check-label">{r.name}</span>
@@ -563,7 +611,7 @@ function MembersSection() {
         })}
       </Modal>
 
-      <Modal
+      <FormModal form={inviteForm}
         className="hf-modal"
         title={
           <>
@@ -601,7 +649,8 @@ function MembersSection() {
               allowClear
               placeholder="选择部门"
               loading={departmentsQuery.isLoading}
-              options={departmentsQuery.data?.map((d) => ({ value: d.id, label: d.name }))}
+              options={departmentOptions(departmentsQuery.data)}
+                showSearch={{ optionFilterProp: 'label' }}
             />
           </Form.Item>
           <Form.Item
@@ -621,7 +670,7 @@ function MembersSection() {
             />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
 
       {/* 初始密码只在此刻拿得到，关掉就再也查不到——必须说清楚并给复制 */}
       <Modal
@@ -758,10 +807,10 @@ function DepartmentsSection() {
           <span className="u-flex-end u-flex-gap-14">
             <span
               className="hf-link"
-              onClick={() => {
+              {...pressable(() => {
                 setEditing(d);
                 form.setFieldsValue({ name: d.name });
-              }}
+              })}
             >
               改名
             </span>
@@ -805,7 +854,7 @@ function DepartmentsSection() {
         </div>
       </div>
 
-      <Modal
+      <FormModal form={form}
         className="hf-modal"
         title={editing ? '部门改名' : '新建部门'}
         open={createOpen || editing != null}
@@ -829,7 +878,7 @@ function DepartmentsSection() {
             <Input />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
     </>
   );
 }
@@ -918,15 +967,15 @@ function CompanyDocsSection() {
       fixed: 'right',
       render: (_, d) => (
         <span className="u-flex-end u-flex-gap-12">
-          <span className="hf-link" onClick={() => setPreviewId(d.id)}>
+          <span className="hf-link" {...pressable(() => setPreviewId(d.id))}>
             预览
           </span>
           <span
             className="hf-link"
-            onClick={() => {
+            {...pressable(() => {
               setEditing(d);
               form.setFieldsValue({ title: d.title, content: d.content, tags: d.tags });
-            }}
+            })}
           >
             编辑
           </span>
@@ -996,7 +1045,7 @@ function CompanyDocsSection() {
         </div>
       </Modal>
 
-      <Modal
+      <FormModal form={form}
         className="hf-modal"
         width={640}
         title={
@@ -1032,7 +1081,7 @@ function CompanyDocsSection() {
             <Input.TextArea rows={10} placeholder="入职问答机器人将依据这段内容回答员工提问" />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
     </>
   );
 }
@@ -1183,7 +1232,7 @@ function AuditSection() {
 export function SettingsPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canManage = hasPermission(PERMISSIONS.CONFIG_MANAGE);
-  const [section, setSection] = useState<Section>('roles');
+  const [section, setSection] = useUrlState<Section>('section', 'roles');
 
   /** 无配置权限的账号只看角色与权限（只读） */
   const sections = canManage ? SECTIONS : SECTIONS.filter((s) => s.key === 'roles');
@@ -1198,7 +1247,7 @@ export function SettingsPage() {
             <div
               key={s.key}
               className={section === s.key ? 'hf-subnav-item hf-subnav-item--on' : 'hf-subnav-item'}
-              onClick={() => setSection(s.key)}
+              {...pressable(() => setSection(s.key))}
             >
               {s.label}
             </div>

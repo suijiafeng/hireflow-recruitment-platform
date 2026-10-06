@@ -5,6 +5,7 @@ import { CurrentUser, type JwtUser } from '../../common/decorators/current-user.
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { InviteUserDto } from './dto/invite-user.dto';
 import { UpdateUserRolesDto } from './dto/update-user-roles.dto';
+import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -33,9 +34,16 @@ export class UsersController {
     return this.usersService.invite(dto, user);
   }
 
+  @Patch(':id/status')
+  @RequirePermissions(PERMISSIONS.USER_MANAGE)
+  @ApiOperation({ summary: '停用 / 启用账号（即时生效；返回其仍负责的在招职位供提示）' })
+  setStatus(@Param('id') id: string, @Body() dto: UpdateUserStatusDto, @CurrentUser() user: JwtUser) {
+    return this.usersService.setStatus(id, dto.status, user);
+  }
+
   @Patch(':id/roles')
   @RequirePermissions(PERMISSIONS.USER_MANAGE)
-  @ApiOperation({ summary: '更新用户角色（全量替换；相关用户重新登录后生效）' })
+  @ApiOperation({ summary: '更新用户角色（全量替换；下一次请求即生效）' })
   updateRoles(@Param('id') id: string, @Body() dto: UpdateUserRolesDto, @CurrentUser() user: JwtUser) {
     return this.usersService.updateRoles(id, dto.roleCodes, user);
   }

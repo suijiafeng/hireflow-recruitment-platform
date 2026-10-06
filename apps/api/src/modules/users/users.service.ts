@@ -27,7 +27,8 @@ export class UsersService {
   /** 内部用户列表（设置页/面试官选择器用） */
   async list(role?: string) {
     return this.prisma.user.findMany({
-      where: role ? { roles: { some: { role: { code: role } } } } : undefined,
+      // 带角色过滤的是选择器（用人经理 / 面试官下拉）：已停用的人不该再被选中
+      where: role ? { status: 'ACTIVE', roles: { some: { role: { code: role } } } } : undefined,
       select: USER_SELECT,
       orderBy: { createdAt: 'asc' },
     });
@@ -104,8 +105,50 @@ export class UsersService {
   }
 
   /**
+   * 停用 / 启用账号。停用即时生效（鉴权每次按库查状态），不删数据、不动历史留痕。
+   * 不能停用自己；不能停掉最后一名在用的管理员。
+   */
+  async setStatus(userId: string, status: 'ACTIVE' | 'DISABLED', actor: JwtUser) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { roles: { include: { role: true } } },
+    });
+    if (!user) throw new NotFoundException('用户不存在');
+    if (user.status === status) return this.prisma.user.findUnique({ where: { id: userId }, select: USER_SELECT });
+    if (status === 'DISABLED') {
+      if (userId === actor.sub) throw new ForbiddenException('不能停用自己的账号');
+      if (user.roles.some((ur) => ur.role.code === RoleCode.ADMIN)) {
+        const otherAdmins = await this.prisma.user.count({
+          where: { id: { not: userId }, status: 'ACTIVE', roles: { some: { role: { code: RoleCode.ADMIN } } } },
+        });
+        if (otherAdmins === 0) throw new ForbiddenException('系统需至少保留一名在用的系统管理员');
+      }
+    }
+    // 停用的人手上还挂着多少职位：返回给前端提示管理员去换用人经理
+    const openJobs = status === 'DISABLED'
+      ? await this.prisma.job.findMany({
+          where: { hiringManagerId: userId, status: { in: ['OPEN', 'PAUSED'] } },
+          select: { id: true, title: true },
+        })
+      : [];
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: userId }, data: { status } });
+      await this.activityLog.record(
+        actor,
+        ACTIVITY_ACTIONS.USER_STATUS_UPDATED,
+        'User',
+        userId,
+        { userName: user.name, status, openJobs: openJobs.map((j) => j.title) },
+        tx,
+      );
+    });
+    const updated = await this.prisma.user.findUnique({ where: { id: userId }, select: USER_SELECT });
+    return { ...updated, openJobs };
+  }
+
+  /**
    * 全量替换用户的角色。
-   * 角色与数据范围随 JWT 下发（多角色取最宽 dataScope），调整后需重新登录生效。
+   * 鉴权每次按库重算角色与权限，调整后下一次请求即生效。
    */
   async updateRoles(userId: string, roleCodes: string[], actor: JwtUser) {
     const user = await this.prisma.user.findUnique({
