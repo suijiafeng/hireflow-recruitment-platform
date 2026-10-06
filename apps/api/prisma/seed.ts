@@ -4,6 +4,7 @@
  */
 import 'dotenv/config';
 import { hashSync } from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 import {
   ACTIVITY_ACTIONS,
   DEFAULT_ONBOARDING_CHECKLIST,
@@ -18,6 +19,9 @@ import { PrismaClient } from '../src/generated/prisma/client';
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
 });
+
+/** 与 src/common/portal.ts 的 newPortalToken 同算法（seed 不引用应用代码） */
+const demoPortalToken = () => randomBytes(24).toString('base64url');
 
 const DEV_PASSWORD = 'Admin@123456';
 
@@ -757,6 +761,8 @@ async function seedExtendedDemo() {
         applicationId: target.application.id,
         salary: { base: o.base, bonusMonths: o.bonusMonths, note: null },
         grade: o.grade,
+        // 发起后约一个月入职：已在职的人按历史日期，待入职的人落在未来
+        startDate: daysAgo(o.daysAgo - 30, 12),
         approvalStatus: o.approvalStatus,
         approvalNote: o.approvalNote,
         sentAt: sent ? createdAt : null,
@@ -765,7 +771,7 @@ async function seedExtendedDemo() {
         decision: o.decision,
         decisionReason: o.decisionReason,
         respondedAt: o.decision ? daysAgo(Math.max(o.daysAgo - 3, 0)) : null,
-        portalToken: o.decision ? null : `demo-offer-${target.application.id.slice(-8)}`,
+        portalToken: o.decision ? null : demoPortalToken(), // 随机：演示站公开，可推算的令牌等于开放门户
         createdAt,
         updatedAt: createdAt,
       },
@@ -826,16 +832,33 @@ async function seedExtendedDemo() {
         checklist,
         documents,
         status: ob.status,
-        portalToken: `demo-onb-${target.application.id.slice(-8)}`,
+        portalToken: demoPortalToken(),
         createdAt,
         updatedAt: createdAt,
       },
     });
+    // 合同变量与真实流程（OnboardingService.createContract）同构，门户才能渲染出完整条款
+    const offerRow = await prisma.offer.findUnique({
+      where: { applicationId: target.application.id },
+      include: { application: { include: { job: { include: { department: true } } } } },
+    });
+    const offerSalary = offerRow?.salary as { base?: number; bonusMonths?: number } | null;
     await prisma.contract.create({
       data: {
         onboardingId: onboarding.id,
-        templateName: '标准劳动合同（三年期）',
-        variables: { salaryBase: 30000, position: '示例岗位' },
+        templateName: '标准劳动合同 v1',
+        variables: {
+          companyName: 'ART 科技有限公司',
+          candidateName: target.candidate.name,
+          jobTitle: offerRow?.application.job.title ?? '-',
+          department: offerRow?.application.job.department.name ?? '-',
+          grade: offerRow?.grade ?? '-',
+          salaryBase: offerSalary?.base ?? null,
+          bonusMonths: offerSalary?.bonusMonths ?? 0,
+          probationMonths: 3,
+          startDate: offerRow?.startDate?.toISOString().slice(0, 10) ?? null,
+          signDate: createdAt.toISOString().slice(0, 10),
+        },
         signStatus: ob.status === 'COMPLETED' ? 'ARCHIVED' : 'SENT',
         evidenceNo: ob.status === 'COMPLETED' ? `EV${Date.now().toString().slice(-10)}` : null,
         createdAt,
@@ -1150,16 +1173,44 @@ async function seedBulkDemo() {
     });
   }
 
+  // 演示账号 interviewer@arthr.local（苏晴）也要有一条「已约」：右栏灰态 + 点进候选人
+  const suqing = await prisma.user.findUnique({ where: { email: 'interviewer@arthr.local' } });
+  if (suqing) {
+    const pending = await prisma.interview.findFirst({
+      where: {
+        status: 'SCHEDULED',
+        scheduledAt: null,
+        interviewers: { some: { userId: suqing.id } },
+      },
+    });
+    const free = pending
+      ? await prisma.interviewerSlot.findFirst({
+          where: { bookedBy: null, userId: suqing.id },
+          orderBy: { startAt: 'asc' },
+        })
+      : null;
+    if (pending && free) {
+      await prisma.interviewerSlot.update({ where: { id: free.id }, data: { bookedBy: pending.id } });
+      await prisma.interview.update({
+        where: { id: pending.id },
+        data: { scheduledAt: free.startAt, durationMins: 60 },
+      });
+    }
+  }
+
   // ---- 站内通知：铃铛之前是空的，未读/已读都要有 ----
-  const notices = [
-    { title: 'Offer 待你审批', body: '邓超（测试工程师）的 Offer 已提交审批', link: '/offers', read: false },
-    { title: '面评待提交', body: '你有 2 场已完成面试尚未提交面评', link: '/interviews', read: false },
-    { title: '材料待人工核对', body: '汪静的学历证书仅有图片，未识别出字段', link: '/onboarding', read: false },
-    { title: 'Offer 即将到期', body: '秦月的 Offer 将于今日到期，请跟进', link: '/offers', read: true },
-    { title: '入职闭环完成', body: '范磊已完成全部入职流程', link: '/onboarding', read: true },
+  // 按角色发：早先同一批通知同时发给管理员和 HR，HR 会收到「Offer 待你审批」却没有审批权限
+  const lintao = await prisma.user.findUniqueOrThrow({ where: { email: 'manager@arthr.local' } });
+  const suqingUser = await prisma.user.findUniqueOrThrow({ where: { email: 'interviewer@arthr.local' } });
+  const notices: Array<{ to: Array<{ id: string }>; title: string; body: string; link: string; read: boolean }> = [
+    { to: [lintao, admin], title: 'Offer 待你审批', body: '邓超（测试工程师）的 Offer 已提交审批', link: '/offers?tab=approve', read: false },
+    { to: [suqingUser], title: '面评待提交', body: '你有已完成的面试尚未提交面评', link: '/interviews?tab=mine', read: false },
+    { to: [hr, admin], title: '材料待人工核对', body: '汪静的学历证书仅有图片，未识别出字段', link: '/onboarding?tab=review', read: false },
+    { to: [hr, admin], title: 'Offer 即将到期', body: '秦月的 Offer 将于今日到期，请跟进', link: '/offers?tab=reply', read: true },
+    { to: [hr, admin], title: '入职闭环完成', body: '范磊已完成全部入职流程', link: '/onboarding?tab=done', read: true },
   ];
-  for (const [i, n] of notices.entries()) {
-    for (const u of [admin, hr]) {
+  for (const [i, { to, ...n }] of notices.entries()) {
+    for (const u of to) {
       await prisma.notification.create({
         data: { userId: u.id, ...n, createdAt: daysAgo(i, 9) },
       });
@@ -1168,7 +1219,7 @@ async function seedBulkDemo() {
 
   console.log(
     `✔ 批量数据：+${jobTitles.length} 个职位 / +${created} 名候选人（含 ${BULK_N - NO_APPLY_FROM} 名未投递、` +
-      `${multiApply} 人多投）/ ${ivCount} 场待办面试 / ${slotCount} 个可约时段 / ${notices.length * 2} 条通知 / +4 个子部门`,
+      `${multiApply} 人多投）/ ${ivCount} 场待办面试 / ${slotCount} 个可约时段 / ${notices.reduce((n, x) => n + x.to.length, 0)} 条通知 / +4 个子部门`,
   );
 }
 

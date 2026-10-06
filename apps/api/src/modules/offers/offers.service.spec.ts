@@ -54,8 +54,8 @@ function makeService(offer: Record<string, unknown>) {
       update: jest.fn().mockResolvedValue({}),
     },
   };
-  const activityLog = { record: jest.fn() };
-  const notifications = { push: jest.fn(), pushToRole: jest.fn() };
+  const activityLog = { record: jest.fn(), recordAuto: jest.fn() };
+  const notifications = { push: jest.fn(), pushToRole: jest.fn(), pushByPermission: jest.fn(), recipientsByPermission: jest.fn().mockResolvedValue([]), jobManagerIds: jest.fn().mockResolvedValue([]) };
   const onboarding = {
     createForApplication: jest.fn().mockResolvedValue({ id: 'ob1' }),
     ensurePortalToken: jest.fn().mockResolvedValue('obtok'),
@@ -86,7 +86,7 @@ describe('OffersService 状态机守卫', () => {
 
   it('仅 REJECTED 可修改重提', async () => {
     const { service } = makeService(makeOffer({ approvalStatus: 'APPROVED' }));
-    await expect(service.resubmit('o1', { salaryBase: 28000 }, HR)).rejects.toThrow('仅被驳回的');
+    await expect(service.resubmit('o1', { salaryBase: 28000, startDate: '2099-01-01' }, HR)).rejects.toThrow('仅被驳回的');
   });
 
   it('发送时生成门户令牌与 5 个工作日答复期（写入条件带状态前置）', async () => {
@@ -111,7 +111,7 @@ describe('OffersService 状态机守卫', () => {
     expect(prisma.application.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { status: 'WITHDRAWN', rejectReason: '接受了其他机会' } }),
     );
-    expect(notifications.pushToRole.mock.calls[0][2]).toContain('2 位流程中候选人');
+    expect(notifications.pushByPermission.mock.calls[0][3]).toContain('2 位流程中候选人');
   });
 
   it('接受后自动创建入职单 + 移卡待入职', async () => {
@@ -136,7 +136,7 @@ describe('OffersService 状态机守卫', () => {
         data: { approvalStatus: 'EXPIRED' },
       }),
     );
-    expect(notifications.pushToRole).toHaveBeenCalled();
+    expect(notifications.pushByPermission).toHaveBeenCalled();
   });
 
   it('续期仅一次', async () => {

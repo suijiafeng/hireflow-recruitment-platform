@@ -38,6 +38,7 @@ export const ACTIVITY_ACTIONS = {
   OFFER_RESUBMITTED: 'offer.resubmitted',
   OFFER_EXTENDED: 'offer.extended',
   OFFER_EXPIRED: 'offer.expired',
+  PORTAL_LINK_ROTATED: 'portal.link_rotated',
   APPLICATION_WITHDRAWN: 'application.withdrawn',
   CANDIDATES_COMPARED: 'application.candidates_compared',
   PRESCREEN_SENT: 'application.prescreen_sent',
@@ -56,6 +57,7 @@ export const ACTIVITY_ACTIONS = {
   ROLE_PERMISSIONS_UPDATED: 'role.permissions_updated',
   USER_INVITED: 'user.invited',
   USER_ROLES_UPDATED: 'user.roles_updated',
+  USER_STATUS_UPDATED: 'user.status_updated',
   DEPARTMENT_CREATED: 'department.created',
   DEPARTMENT_UPDATED: 'department.updated',
   DEPARTMENT_DELETED: 'department.deleted',
@@ -82,6 +84,20 @@ export const DOCUMENT_TYPE_META = {
 } as const;
 
 export type DocumentType = keyof typeof DOCUMENT_TYPE_META;
+
+/** OCR 识别字段的中文名（识别结果对新员工和 HR 展示，不能直接露英文键） */
+export const DOCUMENT_FIELD_LABEL: Record<string, string> = {
+  name: '姓名',
+  idNumber: '身份证号',
+  address: '住址',
+  birth: '出生日期',
+  cardNumber: '卡号',
+  bank: '开户银行',
+  school: '毕业院校',
+  degree: '学历',
+  major: '专业',
+  graduation: '毕业年份',
+};
 
 /** Offer 答复有效期（工作日）：到期失效、可续期一次 */
 export const OFFER_VALID_BUSINESS_DAYS = 5;
@@ -121,3 +137,6 @@ export const REJECT_REASONS = [
 ] as const;
 
 export type ActivityAction = (typeof ACTIVITY_ACTIONS)[keyof typeof ACTIVITY_ACTIONS];
+
+/** AI 面评草稿在评语开头的标记：提醒面试官修改；正式提交时不允许原样保留 */
+export const AI_DRAFT_MARKER = '【AI 草稿·请修改确认】';

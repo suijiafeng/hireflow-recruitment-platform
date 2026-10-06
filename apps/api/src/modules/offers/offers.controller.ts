@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { PortalLinkDto } from '../../common/dto/portal-link.dto';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSIONS } from '@hireflow/shared';
 import { CurrentUser, type JwtUser } from '../../common/decorators/current-user.decorator';
@@ -63,8 +64,8 @@ export class OffersController {
   @Post(':id/portal-link')
   @RequirePermissions(PERMISSIONS.OFFER_INITIATE)
   @ApiOperation({ summary: '获取/补发候选人门户令牌（前端拼 /portal/offer/:token）' })
-  portalLink(@Param('id') id: string, @CurrentUser() user: JwtUser) {
-    return this.offersService.ensurePortalToken(id, user);
+  portalLink(@Param('id') id: string, @Body() dto: PortalLinkDto, @CurrentUser() user: JwtUser) {
+    return this.offersService.ensurePortalToken(id, user, dto.rotate === true);
   }
 
   @Post(':id/respond')

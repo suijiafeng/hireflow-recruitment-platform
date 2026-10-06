@@ -10,7 +10,7 @@ import {
 import { App, Modal, Spin, Table, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { offersApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import { QueryErrorResult } from '../../components/QueryErrorResult';
@@ -21,6 +21,9 @@ import { DeclineEntryModal } from './DeclineEntryModal';
 import { RejectApprovalModal } from './RejectApprovalModal';
 import { ResubmitModal } from './ResubmitModal';
 import { useAuthStore } from '../../stores/auth';
+import { useDrawerParam, useUrlParams, useUrlState } from '../../hooks/useUrlState';
+import { CandidateDetailDrawer } from '../../components/CandidateDetailDrawer';
+import { pressable } from '../../utils/pressable';
 
 /** 分组顺序 = 流程顺序，待办排最上 */
 const GROUPS: Array<{ key: string; label: string; dot: string; tone: string }> = [
@@ -82,7 +85,10 @@ export function OffersPage() {
   const [rejectTarget, setRejectTarget] = useState<Offer | null>(null);
   const [resubmitTarget, setResubmitTarget] = useState<Offer | null>(null);
   const [declineTarget, setDeclineTarget] = useState<Offer | null>(null);
-  const [filter, setFilter] = useState<'all' | 'approve' | 'reply'>('all');
+  const [rawFilter, setFilter] = useUrlState<'all' | 'approve' | 'reply'>('tab', 'all');
+  /** 通知 / 待办深链接 ?focus=<offerId>：滚动到该行并高亮，不用在长列表里找 */
+  const [params] = useUrlParams();
+  const focusId = params.get('focus');
 
   const offersQuery = useQuery({ queryKey: ['offers'], queryFn: offersApi.list, retry: false });
 
@@ -100,13 +106,16 @@ export function OffersPage() {
       })
       .catch((error) => message.error(extractErrorMessage(error, '操作失败')));
 
-  const copyPortalLink = async (offer: Offer) => {
+  const copyPortalLink = async (offer: Offer, rotate = false) => {
     try {
-      const { token } = await offersApi.portalLink(offer.id);
+      const { token } = await offersApi.portalLink(offer.id, rotate);
       const url = `${window.location.origin}/portal/offer/${token}`;
+      if (rotate) invalidate(); // 时间轴新增一条「重新生成链接」
       try {
         await navigator.clipboard.writeText(url);
-        message.success('候选人链接已复制，请通过邮件/IM 发送给候选人');
+        message.success(
+          rotate ? '已重新生成并复制新链接，旧链接已失效' : '候选人链接已复制，请通过邮件/IM 发送给候选人',
+        );
       } catch {
         modal.info({
           title: '候选人链接',
@@ -123,8 +132,13 @@ export function OffersPage() {
   };
 
   const canApprove = hasPermission(PERMISSIONS.OFFER_APPROVE);
+  // 「待我审批」只对有审批权的人有意义；HR 从旧链接带着 tab=approve 进来时回落到全部
+  const filter = rawFilter === 'approve' && !canApprove ? 'all' : rawFilter;
   const canInitiate = hasPermission(PERMISSIONS.OFFER_INITIATE);
   const canViewSalary = hasPermission(PERMISSIONS.SALARY_VIEW);
+  const canReadCandidate = hasPermission(PERMISSIONS.CANDIDATE_READ);
+  // 审批人在这里拍板，得能直接看到面评与简历，而不是去候选人库里再搜一遍
+  const [candidateId, openCandidate, closeCandidate] = useDrawerParam('candidate');
 
   const all = offersQuery.data ?? [];
   /** 分组键：已答复的按 decision 归组，其余按审批状态 */
@@ -262,6 +276,18 @@ export function OffersPage() {
                       },
                     ]
                   : []),
+                {
+                  key: 'relink',
+                  label: '重置链接',
+                  hint: '重新生成候选人链接，旧链接立即失效（误发或疑似泄露时用）',
+                  onClick: () =>
+                    modal.confirm({
+                      title: '重新生成候选人链接？',
+                      content: '旧链接将立即失效，请把新链接重新发给候选人。',
+                      cancelText: '取消',
+                      onOk: () => copyPortalLink(o, true),
+                    }),
+                },
               ]
             : []),
           // 辅助参考，排在最后 —— 顺序靠后自然会被收进「···」
@@ -270,6 +296,15 @@ export function OffersPage() {
       />
     );
   };
+
+  // hooks 必须在任何 early return 之前：否则 403 走错误分支时 hook 数变化，整页崩溃
+  const groupListRef = useSyncedTableScroll<HTMLDivElement>();
+  // 深链接定位：数据到位后把目标行滚到视野中间（高亮样式见 .hf-row--deeplink）
+  const offersLoaded = Boolean(offersQuery.data);
+  useEffect(() => {
+    if (!focusId || !offersLoaded) return;
+    document.getElementById(`offer-${focusId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [focusId, offersLoaded, filter]);
 
   if (offersQuery.isError) {
     return (
@@ -281,9 +316,8 @@ export function OffersPage() {
     );
   }
 
-  const groupListRef = useSyncedTableScroll<HTMLDivElement>();
   /** 列宽合计，低于此宽度出现横向滚动而不是把列挤扁 */
-  const OFFER_TABLE_X = 848;
+  const OFFER_TABLE_X = 944;
   /** 首个非空分组才画表头，其余组直接接在下面，避免整页都是表头 */
   const firstGroupKey = GROUPS.find((g) => visible.some((o) => groupKey(o) === g.key))?.key;
 
@@ -292,7 +326,18 @@ export function OffersPage() {
       title: '候选人',
       key: 'candidate',
       width: 120,
-      render: (_, o) => <span className="hf-primary hf-ellipsis">{o.application.candidate.name}</span>,
+      render: (_, o) =>
+        canReadCandidate ? (
+          <span
+            className="hf-link hf-ellipsis"
+            title="查看简历与面评"
+            {...pressable(() => openCandidate(o.application.candidate.id))}
+          >
+            {o.application.candidate.name}
+          </span>
+        ) : (
+          <span className="hf-primary hf-ellipsis">{o.application.candidate.name}</span>
+        ),
     },
     {
       title: '职位',
@@ -310,6 +355,12 @@ export function OffersPage() {
       dataIndex: 'grade',
       width: 60,
       render: (grade: string | null) => <span className="hf-secondary hf-td--num">{grade ?? '—'}</span>,
+    },
+    {
+      title: '入职日期',
+      dataIndex: 'startDate',
+      width: 96,
+      render: (d: string | null) => <span className="hf-secondary hf-td--num">{d ? dayjs(d).format('MM-DD') : '—'}</span>,
     },
     {
       title: '薪资',
@@ -357,14 +408,25 @@ export function OffersPage() {
       {/* 控制栏：分段筛选 + 流程说明内联（取代整块蓝底流程卡） */}
       <div className="hf-bar">
         <div className="hf-bar-left">
-          <div className="hf-seg">
-            <span className={filter === 'all' ? 'hf-seg--on' : undefined} onClick={() => setFilter('all')}>
+          <div className="hf-seg" role="radiogroup" aria-label="Offer 筛选">
+            <span
+              className={filter === 'all' ? 'hf-seg--on' : undefined}
+              {...pressable(() => setFilter('all'), { role: 'radio', checked: filter === 'all' })}
+            >
               全部
             </span>
-            <span className={filter === 'approve' ? 'hf-seg--on' : undefined} onClick={() => setFilter('approve')}>
-              待我审批
-            </span>
-            <span className={filter === 'reply' ? 'hf-seg--on' : undefined} onClick={() => setFilter('reply')}>
+            {canApprove && (
+              <span
+                className={filter === 'approve' ? 'hf-seg--on' : undefined}
+                {...pressable(() => setFilter('approve'), { role: 'radio', checked: filter === 'approve' })}
+              >
+                待我审批
+              </span>
+            )}
+            <span
+              className={filter === 'reply' ? 'hf-seg--on' : undefined}
+              {...pressable(() => setFilter('reply'), { role: 'radio', checked: filter === 'reply' })}
+            >
               待答复
             </span>
           </div>
@@ -399,7 +461,11 @@ export function OffersPage() {
             <div>
               <div className="hf-state-title">{filter === 'all' ? '还没有 Offer' : '没有符合条件的 Offer'}</div>
               <div className="hf-state-desc">
-                在候选人详情里点「发起 Offer」，提交后会进入审批，审批通过才能发送候选人。
+                {canInitiate
+                  ? '在候选人详情里点「发起 Offer」，提交后会进入审批，审批通过才能发送候选人。'
+                  : canApprove
+                    ? 'HR 发起 Offer 后会通知你审批，待审批的会排在最上面。'
+                    : 'HR 发起的 Offer 会显示在这里。'}
               </div>
             </div>
           </div>
@@ -426,7 +492,12 @@ export function OffersPage() {
                       pagination={false}
                       showHeader={first}
                       scroll={{ x: OFFER_TABLE_X }}
-                      rowClassName={() => (g.key === 'PENDING' ? 'hf-row--todo' : '')}
+                      rowClassName={(o) =>
+                        [g.key === 'PENDING' ? 'hf-row--todo' : '', o.id === focusId ? 'hf-row--deeplink' : '']
+                          .filter(Boolean)
+                          .join(' ')
+                      }
+                      onRow={(o) => (o.id === focusId ? { id: `offer-${o.id}` } : {})}
                     />
                   </div>
                 </div>
@@ -446,6 +517,7 @@ export function OffersPage() {
       <RejectApprovalModal offer={rejectTarget} onClose={() => setRejectTarget(null)} onDone={invalidate} />
       <ResubmitModal offer={resubmitTarget} onClose={() => setResubmitTarget(null)} onDone={invalidate} />
       <DeclineEntryModal offer={declineTarget} onClose={() => setDeclineTarget(null)} onDone={invalidate} />
+      <CandidateDetailDrawer candidateId={candidateId} onClose={closeCandidate} />
     </div>
   );
 }

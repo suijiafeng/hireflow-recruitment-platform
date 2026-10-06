@@ -156,6 +156,8 @@ export interface DetailApplication {
   matchReport?: MatchReport | null;
   /** 终态应聘的淘汰原因码；接口一直有返回，之前类型漏了 */
   rejectReason?: string | null;
+  offer?: { id: string; approvalStatus: string; decision: string | null } | null;
+  prescreen?: PrescreenAnswers | null;
   interviews: Interview[];
 }
 
@@ -231,7 +233,18 @@ export interface BoardCard {
   stageId: string;
   stageEnteredAt: string;
   version: number;
+  prescreen?: PrescreenAnswers | null;
   candidate: { id: string; name: string; tags: string[]; source: string | null };
+}
+
+/** 候选人在预筛门户填的三问 + 规则核验出的不符项 */
+export interface PrescreenAnswers {
+  expectedSalary: number;
+  availableDate: string;
+  travelOk: boolean;
+  note: string | null;
+  flags: string[];
+  submittedAt: string;
 }
 
 /**
@@ -252,6 +265,8 @@ export interface Offer {
   id: string;
   salary: OfferSalary | null;
   grade: string | null;
+  /** 预计入职日期 YYYY-MM-DD（老数据可能为空） */
+  startDate: string | null;
   approvalStatus: string;
   approvalNote: string | null;
   decision: string | null;
@@ -259,7 +274,6 @@ export interface Offer {
   sentAt: string | null;
   expiresAt: string | null;
   extendedOnce: boolean;
-  portalToken: string | null;
   respondedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -294,6 +308,7 @@ export interface OnboardingDocument {
   fileName?: string | null;
   fileUrl?: string | null; // 原件预签名预览链接（10 分钟有效）
   needsReview?: boolean; // 未识别出字段：待人工核对（低置信度阻断）
+  redacted?: boolean; // 当前角色无权查看证件字段（如 IT），fields 被服务端清空
 }
 
 export interface Contract {
@@ -330,10 +345,13 @@ export interface OfferPortalView {
   decisionReason: string | null;
   respondedAt: string | null;
   declineReasons: readonly string[];
+  /** 对接 HR（门户里「联系 HR」用） */
+  hrContact: { name: string; email: string } | null;
   /** 议价/重提中：老链接不展示已撤回的薪资方案 */
   preparing: boolean;
   salary?: OfferSalary | null;
   grade?: string | null;
+  startDate?: string | null;
   sentAt?: string | null;
   expiresAt?: string | null;
   extendedOnce?: boolean;
@@ -409,14 +427,9 @@ export interface PrescreenView {
   company: string;
   candidateName: string;
   jobTitle: string;
-  prescreen: {
-    expectedSalary: number;
-    availableDate: string;
-    travelOk: boolean;
-    note: string | null;
-    flags: string[];
-    submittedAt: string;
-  } | null;
+  prescreen: PrescreenAnswers | null;
+  /** 应聘已终结（淘汰 / 撤回 / 入职），问卷不再开放 */
+  closed?: boolean;
 }
 
 /** 候选人对比（2-4 人并排 + AI 综合意见） */

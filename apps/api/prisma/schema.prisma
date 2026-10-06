@@ -311,6 +311,7 @@ model Offer {
   application    Application         @relation(fields: [applicationId], references: [id])
   salary         Json? // 敏感字段：薪资结构（RBAC salary:view 控制）
   grade          String?
+  startDate      DateTime?           @db.Date // 预计入职日期（随 Offer 审批，进合同与门户）
   approvalStatus OfferApprovalStatus @default(DRAFT)
   approvalNote   String? // 审批意见（驳回带意见退回 HR 修改重提）
   sentAt         DateTime?

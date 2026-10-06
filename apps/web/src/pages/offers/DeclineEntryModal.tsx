@@ -1,9 +1,10 @@
 import { useMutation } from '@tanstack/react-query';
 import { OFFER_DECLINE_REASONS } from '@hireflow/shared';
-import { App, Form, Modal, Select } from 'antd';
+import { App, Form, Select } from 'antd';
 import { offersApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import type { Offer } from '../../api/types';
+import { FormModal } from '../../components/FormModal';
 
 /** HR 代录候选人拒绝：原因码必选 */
 export function DeclineEntryModal({
@@ -27,7 +28,7 @@ export function DeclineEntryModal({
     onError: (error) => message.error(extractErrorMessage(error, '操作失败')),
   });
   return (
-    <Modal
+    <FormModal form={form}
       className="hf-modal"
       title={offer ? `录入拒绝：${offer.application.candidate.name}` : '录入拒绝'}
       open={Boolean(offer)}
@@ -47,6 +48,6 @@ export function DeclineEntryModal({
           <Select placeholder="选择原因" options={OFFER_DECLINE_REASONS.map((r) => ({ value: r, label: r }))} />
         </Form.Item>
       </Form>
-    </Modal>
+    </FormModal>
   );
 }

@@ -1,12 +1,14 @@
 import { CheckOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Form, Modal, Result, Select, Spin } from 'antd';
+import { App, Button, Form, Result, Select, Spin } from 'antd';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { portalApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import { PortalShell } from './InterviewPortalPage';
+import { FormModal } from '../../components/FormModal';
+import { pressable } from '../../utils/pressable';
 
 /**
  * Offer 门户（免登录 H5）：
@@ -152,9 +154,19 @@ export function OfferPortalPage() {
             接受 Offer
           </Button>
           <div className="hf-portal-actions">
-            <span className="hf-muted">有疑问，联系 HR</span>
+            {/* 「联系 HR」必须真的能点：邮件直达对接 HR；拿不到联系人时才退回纯文字 */}
+            {view.hrContact ? (
+              <a
+                className="hf-portal-action"
+                href={`mailto:${view.hrContact.email}?subject=${encodeURIComponent(`关于 ${view.jobTitle} Offer 的咨询`)}`}
+              >
+                有疑问，联系 {view.hrContact.name}
+              </a>
+            ) : (
+              <span className="hf-muted">有疑问，请联系 HR</span>
+            )}
             <span className="hf-portal-sep" />
-            <span className="hf-link hf-link--danger" onClick={() => setDeclineOpen(true)}>
+            <span className="hf-link hf-link--danger hf-portal-action" {...pressable(() => setDeclineOpen(true))}>
               婉拒
             </span>
           </div>
@@ -181,6 +193,12 @@ export function OfferPortalPage() {
         <span className="hf-kv-k">部门 / 职级</span>
         <span className="hf-kv-v">{[view.department, view.grade].filter(Boolean).join(' · ')}</span>
       </div>
+      {view.startDate && (
+        <div className="hf-kv">
+          <span className="hf-kv-k">入职日期</span>
+          <span className="hf-kv-v hf-td--num">{dayjs(view.startDate).format('YYYY 年 M 月 D 日')}</span>
+        </div>
+      )}
       {base != null && (
         <>
           {/* 月薪做主视觉 */}
@@ -219,7 +237,7 @@ export function OfferPortalPage() {
         <span>薪资与职级信息仅对你本人可见。如需调整入职日期或对方案有疑问，可直接联系 HR。</span>
       </div>
 
-      <Modal
+      <FormModal form={declineForm}
         className="hf-modal"
         title="确认婉拒这份 Offer？"
         open={declineOpen}
@@ -244,7 +262,7 @@ export function OfferPortalPage() {
             <Select placeholder="选择原因" options={view.declineReasons.map((r) => ({ value: r, label: r }))} />
           </Form.Item>
         </Form>
-      </Modal>
+      </FormModal>
     </PortalShell>
   );
 }

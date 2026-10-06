@@ -1,8 +1,9 @@
 import { useMutation } from '@tanstack/react-query';
-import { App, Form, Input, Modal } from 'antd';
+import { App, Form, Input } from 'antd';
 import { offersApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import type { Offer } from '../../api/types';
+import { FormModal } from '../../components/FormModal';
 
 /** 审批驳回：意见必填，退回 HR 修改重提 */
 export function RejectApprovalModal({
@@ -26,7 +27,7 @@ export function RejectApprovalModal({
     onError: (error) => message.error(extractErrorMessage(error, '操作失败')),
   });
   return (
-    <Modal
+    <FormModal form={form}
       className="hf-modal"
       title={offer ? `驳回 Offer：${offer.application.candidate.name}` : '驳回 Offer'}
       open={Boolean(offer)}
@@ -46,6 +47,6 @@ export function RejectApprovalModal({
           <Input.TextArea rows={3} placeholder="如：薪资超出该职级带宽，请调整后重提" maxLength={500} />
         </Form.Item>
       </Form>
-    </Modal>
+    </FormModal>
   );
 }

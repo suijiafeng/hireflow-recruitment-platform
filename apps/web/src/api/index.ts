@@ -45,7 +45,11 @@ import type {
 export const authApi = {
   login: (data: { email: string; password: string }) =>
     http.post<{ accessToken: string; user: AuthUser }>('/auth/login', data).then((r) => r.data),
-  profile: () => http.get<AuthUser>('/auth/profile').then((r) => r.data),
+  /** 接口的 roles 是 {code,name,dataScope}[]，这里压平成与登录返回一致的 AuthUser */
+  profile: () =>
+    http
+      .get<Omit<AuthUser, 'roles'> & { roles: Array<{ code: string }> }>('/auth/profile')
+      .then((r): AuthUser => ({ ...r.data, roles: r.data.roles.map((role) => role.code) })),
 };
 
 export const jobsApi = {
@@ -93,7 +97,7 @@ export const boardApi = {
 };
 
 export const candidatesApi = {
-  list: (params: { page?: number; pageSize?: number; keyword?: string }) =>
+  list: (params: { page?: number; pageSize?: number; keyword?: string; stage?: 'screening' }) =>
     http.get<Paginated<Candidate>>('/candidates', { params }).then((r) => r.data),
   create: (data: { name: string; email?: string; phone?: string; source?: string; tags?: string[] }) =>
     http.post<Candidate>('/candidates', data).then((r) => r.data),
@@ -140,6 +144,7 @@ export const offersApi = {
     applicationId: string;
     salaryBase: number;
     bonusMonths?: number;
+    startDate: string;
     grade?: string;
     note?: string;
   }) => http.post<Offer>('/offers', data).then((r) => r.data),
@@ -149,12 +154,13 @@ export const offersApi = {
     http.post<Offer>(`/offers/${id}/reject`, { note }).then((r) => r.data),
   resubmit: (
     id: string,
-    data: { salaryBase: number; bonusMonths?: number; grade?: string; note?: string },
+    data: { salaryBase: number; bonusMonths?: number; startDate: string; grade?: string; note?: string },
   ) => http.post<Offer>(`/offers/${id}/resubmit`, data).then((r) => r.data),
   send: (id: string) => http.post<Offer>(`/offers/${id}/send`).then((r) => r.data),
   extend: (id: string) => http.post<Offer>(`/offers/${id}/extend`).then((r) => r.data),
-  portalLink: (id: string) =>
-    http.post<{ token: string }>(`/offers/${id}/portal-link`).then((r) => r.data),
+  /** rotate=true 重新生成链接，旧链接立即失效 */
+  portalLink: (id: string, rotate = false) =>
+    http.post<{ token: string }>(`/offers/${id}/portal-link`, { rotate }).then((r) => r.data),
   respond: (id: string, decision: 'ACCEPTED' | 'DECLINED', reason?: string) =>
     http.post<Offer>(`/offers/${id}/respond`, { decision, reason }).then((r) => r.data),
   retention: (id: string) => http.post<RetentionHint>(`/offers/${id}/retention`).then((r) => r.data),
@@ -228,8 +234,9 @@ export const onboardingApi = {
     http.post<Onboarding>(`/contracts/${contractId}/send`).then((r) => r.data),
   signContract: (contractId: string) =>
     http.post<Onboarding>(`/contracts/${contractId}/sign`).then((r) => r.data),
-  portalLink: (id: string) =>
-    http.post<{ token: string }>(`/onboardings/${id}/portal-link`).then((r) => r.data),
+  /** rotate=true 重新生成链接，旧链接立即失效 */
+  portalLink: (id: string, rotate = false) =>
+    http.post<{ token: string }>(`/onboardings/${id}/portal-link`, { rotate }).then((r) => r.data),
 };
 
 export const helpdeskApi = {
@@ -315,6 +322,11 @@ export const usersApi = {
     http.get<UserItem[]>('/users', { params: role ? { role } : undefined }).then((r) => r.data),
   updateRoles: (userId: string, roleCodes: string[]) =>
     http.patch<UserItem>(`/users/${userId}/roles`, { roleCodes }).then((r) => r.data),
+  /** 停用 / 启用；停用时返回其仍负责的在招职位，提示管理员换用人经理 */
+  setStatus: (userId: string, status: 'ACTIVE' | 'DISABLED') =>
+    http
+      .patch<UserItem & { openJobs: Array<{ id: string; title: string }> }>(`/users/${userId}/status`, { status })
+      .then((r) => r.data),
   /** 邀请内部成员；initialPassword 仅此一次返回，页面须提示管理员立即转交 */
   invite: (data: InviteUserInput) =>
     http.post<{ user: UserItem; initialPassword: string }>('/users', data).then((r) => r.data),

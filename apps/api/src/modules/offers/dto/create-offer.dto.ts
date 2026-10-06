@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { IsDateString, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { OFFER_DECLINE_REASONS } from '@hireflow/shared';
 
 /** Offer 薪资包字段（发起与修改重提共用） */
@@ -16,6 +16,10 @@ export class OfferPackageDto {
   @Min(0)
   @Max(12)
   bonusMonths?: number;
+
+  @ApiProperty({ description: '预计入职日期（YYYY-MM-DD）', example: '2026-11-02' })
+  @IsDateString({ strict: true }, { message: '请填写预计入职日期' })
+  startDate: string;
 
   @ApiPropertyOptional({ description: '职级', example: 'P6' })
   @IsOptional()
