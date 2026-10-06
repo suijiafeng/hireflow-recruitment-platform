@@ -1,4 +1,5 @@
 import { Dropdown } from 'antd';
+import { pressable } from '../utils/pressable';
 
 export type RowAction = {
   key: string;
@@ -44,11 +45,14 @@ export function RowActions({ actions, max = 2 }: Props) {
           key={a.key}
           className={a.disabled ? 'hf-link hf-link--off' : a.danger ? 'hf-link hf-link--danger' : 'hf-link'}
           title={a.hint ?? a.label}
-          onClick={(e) => {
-            // 列里还有别的可点元素，且外层可能有 Dropdown/Drawer，统一拦掉冒泡
-            e.stopPropagation();
-            if (!a.disabled) a.onClick();
-          }}
+          {...pressable(
+            (e) => {
+              // 列里还有别的可点元素，且外层可能有 Dropdown/Drawer，统一拦掉冒泡
+              e.stopPropagation();
+              a.onClick();
+            },
+            { disabled: a.disabled },
+          )}
         >
           {a.label}
         </span>
@@ -69,7 +73,7 @@ export function RowActions({ actions, max = 2 }: Props) {
             },
           }}
         >
-          <span className="hf-more" onClick={(e) => e.stopPropagation()}>
+          <span className="hf-more" aria-label="更多操作" {...pressable((e) => e.stopPropagation())}>
             ···
           </span>
         </Dropdown>
