@@ -10,13 +10,13 @@
 
 **[👉 在线体验 demo.suijf.site](https://demo.suijf.site)** —— 登录页右侧列出了系统管理员 / HR / 用人经理 / 面试官四个角色的测试账号，用不同角色登录可以直接看出权限与数据范围的差异。
 
-### 数据洞察：TTH 中位数、渠道效能、面试官效能、阶段停留分位
+## 数据洞察：TTH 中位数、渠道效能、面试官效能、阶段停留分位
 
 ![数据洞察](./screenshot/insights.jpg)
 
 > 招聘周期 TTH 取**中位数而非均值**（小样本下均值会被个别超长案例带偏）；阶段停留同时给 **P50 与 P90**（P90 才是"最慢的那批人卡在哪"）；渠道效能追踪「投递 → 进面 → Offer → 入职」四段转化，而不只是投递量。
 
-### 角色与权限：按钮级权限 × 行级数据范围
+## 角色与权限：按钮级权限 × 行级数据范围
 
 ![角色与权限](./screenshot/rbac.jpg)
 
@@ -107,7 +107,7 @@
 ### 步骤 1：克隆并安装依赖
 
 ```bash
-git clone https://github.com/suijiafeng/hireFlow-recruitment-platform.git
+git clone https://github.com/suijiafeng/hireflow-recruitment-platform.git
 cd hireFlow-recruitment-platform
 npm install
 ```
@@ -175,11 +175,11 @@ MinIO 的 bucket 不用手建，API 启动时不存在会自动创建。
 |-----|--------|------|
 | **应用** | http://localhost:5173 | React 前端应用 |
 | **API 文档** | http://localhost:3000/api/docs | Swagger 交互式文档 |
-| **MinIO 控制台** | http://localhost:9001 | 对象存储管理（账号: minioadmin/minioadmin） |
+| **MinIO 控制台** | http://localhost:9001 | 对象存储管理（账号：请修改为强密码；生产环境请修改） |
 
 ### 测试账号
 
-所有测试账号密码统一为 `Admin@123456`
+所有测试账号密码统一为 `请修改为强密码`（生产环境请修改）
 
 | 账号 | 角色 | 数据权限 | 场景 |
 |------|-----|--------|------|
@@ -467,7 +467,7 @@ if (r.count === 0) throw new ConflictException('该 Offer 状态已变更，请�
 
 1. **Fork & Clone**
    ```bash
-   git clone https://github.com/suijiafeng/hireFlow-recruitment-platform.git
+   git clone https://github.com/suijiafeng/hireflow-recruitment-platform.git
    cd hireFlow-recruitment-platform
    npm install
    ```
@@ -515,7 +515,7 @@ npm run lint  -w apps/web       # oxlint
 
 ### 报告 Bug
 
-如发现 bug，请通过 [Issues](https://github.com/suijiafeng/hireFlow-recruitment-platform.issues) 报告，包含：
+如发现 bug，请通过 [Issues](https://github.com/suijiafeng/hireflow-recruitment-platform/issues) 报告，包含：
 - 复现步骤
 - 预期行为 vs 实际行为
 - 环境信息（Node 版本、浏览器等）
