@@ -122,7 +122,7 @@ npm install
 cp apps/api/.env.example apps/api/.env
 ```
 
-默认值开箱即用，不用改。`.env.example` 开头的注释写了 `npm run dev:docker`，仓库里没有这个脚本；连外部数据库用的是下面的 `npm run dev:external-db`。
+默认值开箱即用，不用改。连外部数据库的步骤写在 `.env.example` 里，和下面的「想用真 Postgres」相同。
 
 ### 步骤 3：启动
 
@@ -457,7 +457,7 @@ if (result.count === 0) throw new ConflictException('该 Offer 刚被答复过�
 
 | 现状 | 代价 | 正确做法 |
 |---|---|---|
-| **访问令牌 12h，无 refresh、无吊销名单。鉴权本身已改为每请求查库** | 令牌只证明「你是谁」。改权限、改数据范围、停用账号，下一次 API 请求即生效。泄露且账号仍启用的令牌，在剩余有效期内无法单独作废。设置页和 `PermissionsGuard` / `rbac.service` 的注释仍写着「重新登录后生效」，和守卫行为不一致；前端菜单最多滞后一个 profile 缓存周期（60s，回到窗口会重拉） | 短 access token + refresh，或令牌版本号。把设置页和过期注释改成与 `JwtAuthGuard` 一致 |
+| **访问令牌 12h，无 refresh、无吊销名单。鉴权本身已改为每请求查库** | 令牌只证明「你是谁」。改权限、改数据范围、停用账号，下一次 API 请求即生效。泄露且账号仍启用的令牌，在剩余有效期内无法单独作废。设置页已按此说明。`PermissionsGuard`、`rbac.service` 和角色权限接口的 Swagger 摘要仍写着「重新登录后生效」。前端菜单最多滞后一个 profile 缓存周期（60s，回到窗口会重拉） | 短 access token + refresh，或令牌版本号。把剩余注释和 Swagger 摘要改成与 `JwtAuthGuard` 一致 |
 | **`expectedVersion` 在 DTO 里是可选的** | 客户端不传即退化成无锁——**这是协议性乐观锁，防误操作有效，防恶意无效**；批量移动复用 `moveStage` 但不传版本号，整条路径无锁 | 设为必填，或把 `stageId`（从哪一列来）也钉进 `WHERE`，让「起点」也成为 CAS 条件 |
 | **数据范围的 where 在 7 个 service 里手写** | `jobs`、`candidates`、`applications`、`interviews`、`offers`、`onboarding`、`analytics` 各自拼部门 / 指派条件，拒绝文案也不统一。加一档新范围要改这些调用点 | 用 Prisma Client Extension 在 ORM 层统一注入；`data-scope.ts` 对 `DataScope` 做 exhaustive switch，新增枚举值不处理就编译失败 |
 | **门户 token 本身没有过期时间** | token 在 URL path 段，会进反代日志、浏览器历史、Referer。Offer 与入职链接可以 `rotate` 作废旧链；预筛和面试选时只在为空时生成，没有轮换入口。Offer 的 `expiresAt` 是 5 个工作日答复期，不是 token 过期 | 给令牌加 `expiresAt`、提交后置空、加限流。预筛 / 选时与 Offer、入职一样支持轮换 |
@@ -601,7 +601,7 @@ A: 上传白名单是 PDF、Word（`.doc` / `.docx`）、纯文本、JPEG / PNG 
 A: 阶段挂在**职位**上，不挂在部门上。新建职位时写入默认六段：简历初筛、一面、二面、Offer、待入职、已入职（`DEFAULT_PIPELINE_STAGES`）。后端有 `GET/PUT /api/jobs/:id/stages`（权限 `job:stages:manage`）。当前 Web 没有编辑阶段的页面；「设置 → 部门管理」只管理部门树。
 
 ### Q: 权限体系如何工作？
-A: 预置 7 个角色：系统管理员、HR、用人经理、面试官、IT / 行政，以及门户用的候选人、新员工。功能权限是该用户全部角色的并集；数据范围取最宽的一档。设置页可以改非管理员角色的权限矩阵并导出 CSV。API 每次请求按数据库重算，不必等令牌过期；设置页上「需重新登录生效」的文案还没改过来。
+A: 预置 7 个角色：系统管理员、HR、用人经理、面试官、IT / 行政，以及门户用的候选人、新员工。功能权限是该用户全部角色的并集；数据范围取最宽的一档。设置页可以改非管理员角色的权限矩阵并导出 CSV。API 每次请求按数据库重算，不必等令牌过期；对方菜单和按钮随个人资料刷新（约一分钟，或回到窗口）更新。
 
 ---
 > **声明**：本仓库为个人项目，仅供学习交流。
