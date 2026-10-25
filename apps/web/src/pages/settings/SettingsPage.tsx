@@ -76,7 +76,7 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
   const saveMutation = useMutation({
     mutationFn: () => rbacApi.updateRolePermissions(role!.id, selected),
     onSuccess: () => {
-      message.success('权限已保存，相关账号重新登录后生效');
+      message.success('权限已保存，相关账号的下一次请求即按新权限校验');
       void queryClient.invalidateQueries({ queryKey: ['roles'] });
     },
     onError: (error) => message.error(extractErrorMessage(error, '保存失败')),
@@ -212,7 +212,7 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
 
       <div className="hf-notice">
         <WarningOutlined />
-        <span>权限与数据范围随登录令牌下发，调整后相关账号需重新登录方可生效。系统管理员始终拥有全部权限，不可编辑。</span>
+        <span>接口按数据库中的当前权限校验，保存后下一次请求即生效，不必重新登录。对方的菜单和按钮会在回到窗口或约一分钟内更新。系统管理员始终拥有全部权限，不可编辑。</span>
       </div>
 
       <div className="hf-atable hf-atable--fit">
@@ -274,7 +274,7 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
         footer={
           canManage && !isAdmin ? (
             <>
-              <span className="hf-modal-hint">保存后相关账号需重新登录才生效</span>
+              <span className="hf-modal-hint">保存后下一次请求即生效</span>
               {defaults && <Button onClick={() => setSelectedCodes([...defaults])}>恢复默认</Button>}
               <Button onClick={() => setSelectedId(null)}>取消</Button>
               <Button type="primary" loading={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
@@ -592,7 +592,7 @@ function MembersSection() {
       >
         <div className="hf-notice u-mb-16">
           <WarningOutlined />
-          <span>角色与数据范围随登录令牌下发，调整后该账号需重新登录方可生效。</span>
+          <span>保存后，该账号的下一次请求即按新角色校验，不必重新登录。菜单和按钮会在回到窗口或约一分钟内更新。</span>
         </div>
         {internalRoles.map((r) => {
           const checked = selected.includes(r.code);
