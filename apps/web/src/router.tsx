@@ -1,21 +1,23 @@
+import type { ComponentType } from 'react';
 import { createBrowserRouter, Navigate } from 'react-router';
-import { firstVisiblePath, MainLayout } from './layouts/MainLayout';
+import { firstVisiblePath } from './layouts/nav';
 import { useAuthStore } from './stores/auth';
-import { CandidatesPage } from './pages/candidates/CandidatesPage';
-import { DashboardPage } from './pages/dashboard/DashboardPage';
-import { InsightsPage } from './pages/insights/InsightsPage';
-import { HelpdeskPage } from './pages/helpdesk/HelpdeskPage';
-import { InterviewsPage } from './pages/interviews/InterviewsPage';
-import { JobsPage } from './pages/jobs/JobsPage';
-import { LoginPage } from './pages/Login';
-import { OffersPage } from './pages/offers/OffersPage';
-import { OnboardingPage } from './pages/onboarding/OnboardingPage';
-import { PipelinePage } from './pages/pipeline/PipelinePage';
-import { InterviewPortalPage } from './pages/portal/InterviewPortalPage';
-import { OfferPortalPage } from './pages/portal/OfferPortalPage';
-import { OnboardingPortalPage } from './pages/portal/OnboardingPortalPage';
-import { PrescreenPortalPage } from './pages/portal/PrescreenPortalPage';
-import { SettingsPage } from './pages/settings/SettingsPage';
+
+function RouteFallback() {
+  return (
+    <div className="loading-center loading-center--lg" role="status">
+      加载中…
+    </div>
+  );
+}
+
+/** 路由级懒加载：匹配到的页面（及其独占依赖）打成独立 chunk，不进首屏包。 */
+function lazyPage<T>(load: () => Promise<T>, name: keyof T) {
+  return async () => {
+    const mod = await load();
+    return { Component: mod[name] as ComponentType };
+  };
+}
 
 /** 首页按权限落到第一个可见菜单（面试官/IT 无数据大盘权限，不能硬跳 /dashboard） */
 function HomeRedirect() {
@@ -24,28 +26,42 @@ function HomeRedirect() {
 }
 
 export const router = createBrowserRouter([
-  { path: '/login', element: <LoginPage /> },
-  // 候选人/新员工免登录门户（链接即凭证，不走 MainLayout 鉴权）
-  { path: '/portal/offer/:token', element: <OfferPortalPage /> },
-  { path: '/portal/onboarding/:token', element: <OnboardingPortalPage /> },
-  { path: '/portal/interview/:token', element: <InterviewPortalPage /> },
-  { path: '/portal/prescreen/:token', element: <PrescreenPortalPage /> },
   {
-    path: '/',
-    element: <MainLayout />,
+    hydrateFallbackElement: <RouteFallback />,
     children: [
-      { index: true, element: <HomeRedirect /> },
-      { path: 'dashboard', element: <DashboardPage /> },
-      { path: 'insights', element: <InsightsPage /> },
-      { path: 'jobs', element: <JobsPage /> },
-      { path: 'candidates', element: <CandidatesPage /> },
-      { path: 'pipeline', element: <PipelinePage /> },
-      { path: 'interviews', element: <InterviewsPage /> },
-      { path: 'offers', element: <OffersPage /> },
-      { path: 'onboarding', element: <OnboardingPage /> },
-      { path: 'helpdesk', element: <HelpdeskPage /> },
-      { path: 'settings', element: <SettingsPage /> },
+      { path: '/login', lazy: lazyPage(() => import('./pages/Login'), 'LoginPage') },
+      // 候选人/新员工免登录门户（链接即凭证，不走 MainLayout 鉴权）
+      { path: '/portal/offer/:token', lazy: lazyPage(() => import('./pages/portal/OfferPortalPage'), 'OfferPortalPage') },
+      {
+        path: '/portal/onboarding/:token',
+        lazy: lazyPage(() => import('./pages/portal/OnboardingPortalPage'), 'OnboardingPortalPage'),
+      },
+      {
+        path: '/portal/interview/:token',
+        lazy: lazyPage(() => import('./pages/portal/InterviewPortalPage'), 'InterviewPortalPage'),
+      },
+      {
+        path: '/portal/prescreen/:token',
+        lazy: lazyPage(() => import('./pages/portal/PrescreenPortalPage'), 'PrescreenPortalPage'),
+      },
+      {
+        path: '/',
+        lazy: lazyPage(() => import('./layouts/MainLayout'), 'MainLayout'),
+        children: [
+          { index: true, element: <HomeRedirect /> },
+          { path: 'dashboard', lazy: lazyPage(() => import('./pages/dashboard/DashboardPage'), 'DashboardPage') },
+          { path: 'insights', lazy: lazyPage(() => import('./pages/insights/InsightsPage'), 'InsightsPage') },
+          { path: 'jobs', lazy: lazyPage(() => import('./pages/jobs/JobsPage'), 'JobsPage') },
+          { path: 'candidates', lazy: lazyPage(() => import('./pages/candidates/CandidatesPage'), 'CandidatesPage') },
+          { path: 'pipeline', lazy: lazyPage(() => import('./pages/pipeline/PipelinePage'), 'PipelinePage') },
+          { path: 'interviews', lazy: lazyPage(() => import('./pages/interviews/InterviewsPage'), 'InterviewsPage') },
+          { path: 'offers', lazy: lazyPage(() => import('./pages/offers/OffersPage'), 'OffersPage') },
+          { path: 'onboarding', lazy: lazyPage(() => import('./pages/onboarding/OnboardingPage'), 'OnboardingPage') },
+          { path: 'helpdesk', lazy: lazyPage(() => import('./pages/helpdesk/HelpdeskPage'), 'HelpdeskPage') },
+          { path: 'settings', lazy: lazyPage(() => import('./pages/settings/SettingsPage'), 'SettingsPage') },
+        ],
+      },
+      { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
-  { path: '*', element: <Navigate to="/" replace /> },
 ]);

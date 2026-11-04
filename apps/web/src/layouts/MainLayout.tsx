@@ -15,16 +15,17 @@ import {
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { PERMISSIONS, ROLE_LABEL, type RoleCode } from '@hireflow/shared';
+import { ROLE_LABEL, type RoleCode } from '@hireflow/shared';
 import { Avatar, Breadcrumb, Button, Drawer, Dropdown, Layout, Menu, Result, Space, Tag, Typography } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { authApi } from '../api';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 import { NotificationBell } from '../components/NotificationBell';
 import { useAuthStore } from '../stores/auth';
 import { loginUrlFor } from '../utils/redirect';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { firstVisiblePath, NAV_GROUPS } from './nav';
 
 const { Header, Sider, Content } = Layout;
 
@@ -41,62 +42,27 @@ const PAGE_TITLES: Record<string, string> = {
   '/settings': '系统设置',
 };
 
-/** 菜单项与所需权限码（任一命中即可见；不配 perms = 全员可见）——按钮级权限约定 */
-const MENU_DEFS: Array<{
-  label: string;
-  children: Array<{ key: string; icon: React.ReactNode; label: string; perms?: string[] }>;
-}> = [
-  {
-    label: '招聘',
-    children: [
-      { key: '/dashboard', icon: <DashboardOutlined />, label: '数据大盘', perms: [PERMISSIONS.DASHBOARD_VIEW] },
-      { key: '/insights', icon: <FundOutlined />, label: '数据洞察', perms: [PERMISSIONS.DASHBOARD_VIEW] },
-      { key: '/jobs', icon: <ProfileOutlined />, label: '职位管理', perms: [PERMISSIONS.JOB_READ] },
-      { key: '/candidates', icon: <TeamOutlined />, label: '候选人', perms: [PERMISSIONS.CANDIDATE_READ] },
-      { key: '/pipeline', icon: <AppstoreOutlined />, label: '招聘看板', perms: [PERMISSIONS.JOB_READ] },
-      {
-        key: '/interviews',
-        icon: <ScheduleOutlined />,
-        label: '面试管理',
-        perms: [PERMISSIONS.INTERVIEW_SCHEDULE, PERMISSIONS.EVALUATION_SUBMIT],
-      },
-    ],
-  },
-  {
-    label: '录用与入职',
-    children: [
-      {
-        key: '/offers',
-        icon: <AuditOutlined />,
-        label: '录用管理',
-        perms: [PERMISSIONS.OFFER_INITIATE, PERMISSIONS.OFFER_APPROVE],
-      },
-      { key: '/onboarding', icon: <IdcardOutlined />, label: '入职管理', perms: [PERMISSIONS.ONBOARDING_READ] },
-      { key: '/helpdesk', icon: <CommentOutlined />, label: '入职问答' },
-    ],
-  },
-  {
-    label: '系统',
-    children: [
-      {
-        key: '/settings',
-        icon: <SettingOutlined />,
-        label: '系统设置',
-        perms: [PERMISSIONS.USER_MANAGE, PERMISSIONS.CONFIG_MANAGE],
-      },
-    ],
-  },
-];
+const MENU_ICONS: Record<string, ReactNode> = {
+  '/dashboard': <DashboardOutlined />,
+  '/insights': <FundOutlined />,
+  '/jobs': <ProfileOutlined />,
+  '/candidates': <TeamOutlined />,
+  '/pipeline': <AppstoreOutlined />,
+  '/interviews': <ScheduleOutlined />,
+  '/offers': <AuditOutlined />,
+  '/onboarding': <IdcardOutlined />,
+  '/helpdesk': <CommentOutlined />,
+  '/settings': <SettingOutlined />,
+};
 
-/**
- * 登录后的首页 = 左侧菜单里第一个有权限看的菜单项，与菜单显隐用同一份 MENU_DEFS，
- * 不再为某个角色单独特判（否则默认页与菜单第一项不一致，切换账号时容易困惑）。
- * 「入职问答」不配权限、全员可见，所以兜底一定能找到。
- */
-export function firstVisiblePath(hasPermission: (p: string) => boolean): string {
-  const items = MENU_DEFS.flatMap((group) => group.children);
-  return items.find((item) => !item.perms || item.perms.some((p) => hasPermission(p)))?.key ?? '/helpdesk';
-}
+/** 侧边栏：路径和权限以 nav.ts 为准，这里只补图标 */
+const MENU_DEFS = NAV_GROUPS.map((group) => ({
+  label: group.label,
+  children: group.children.map((item) => ({
+    ...item,
+    icon: MENU_ICONS[item.key],
+  })),
+}));
 
 export function MainLayout() {
   const navigate = useNavigate();
