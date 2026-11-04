@@ -156,14 +156,15 @@ DATABASE_URL="postgresql://arthr:arthr_dev_password@localhost:5432/arthr?schema=
 
 ```bash
 docker compose up -d          # 或者用你自己的 Postgres
-npm run db:generate           # 生成 Prisma Client（src/generated 不进 git，必须跑）
+npm run db:generate           # 重新生成 Prisma Client（npm install 已生成过；改 schema 后再跑）
 npm run db:migrate            # 建表
 npm run db:seed               # 灌演示数据
 npm run dev:external-db       # 不拉起 PGlite，直连 DATABASE_URL
 ```
 
-> `npm run dev` 那条路径里，建库/迁移/种子由 `db:setup` 自动完成；`dev:external-db` 只启动服务，
-> 上面三步是首次连一个空库时必须手动补的，否则 API 一查表就报错。库里已有数据时直接起最后一条即可。
+> `npm run dev` 那条路径里，建库/迁移/种子由 `db:setup` 自动完成；`dev:external-db` 只启动服务。
+> Prisma Client 在 `npm install` 时生成（`apps/api` 的 build / test 也会再生成一次）。
+> 首次连一个空库时仍要手动 `db:migrate` 和 `db:seed`，否则 API 一查表就报错。库里已有数据时直接起最后一条即可。
 
 MinIO 的 bucket 不用手建，API 启动时不存在会自动创建。
 
@@ -408,12 +409,12 @@ if (r.count === 0) throw new ConflictException('该 Offer 状态已变更，请�
 
 | 现状 | 代价 | 正确做法 |
 |---|---|---|
-| **权限快照进 JWT，有效期 12h，无 refresh / 黑名单** | 改权限最长 12 小时后才生效；禁用账号只在登录时校验 | 短 access token + refresh，或在 claim 里放权限版本号，服务端比对版本失效即拒。前端目前一路提示「需重新登录生效」作为补偿 |
+| **访问令牌 12h、无 refresh / 黑名单** | 过期前令牌仍能用来认人；停用和改权限在下一次请求生效，但不能立刻作废已发出的令牌 | 短 access token + refresh，或服务端会话黑名单 |
 | **`expectedVersion` 在 DTO 里是可选的** | 客户端不传即退化成无锁——**这是协议性乐观锁，防误操作有效，防恶意无效**；批量移动接口复用单条逻辑但未传版本号，整条路径无锁 | 设为必填，或把 `stageId`（从哪一列来）也钉进 `WHERE`，让「起点」也成为 CAS 条件 |
 | **数据范围的 where 拼装在 6 个 service 里重复 11 处** | 加一档新的数据范围要改 11 个地方；「这个职位是不是我部门的」这个子查询写了三遍，三种错误文案 | 用 Prisma Client Extension 在 ORM 层统一注入范围条件，让「漏加」变成不可能而不是靠自觉；`data-scope.ts` 改 exhaustive switch，新增枚举值不处理直接编译报错 |
 | **门户 token 永不过期、不轮换** | token 在 URL path 段，会进反代日志、浏览器历史、Referer | 加 `expiresAt` 列、重发时轮换、提交后置空、加限流。业务层已有 Offer `expiresAt` 与懒过期，但那是业务过期不是 token 过期 |
 | **测试只有 4 个 spec，且乐观锁本身零覆盖** | 测试里 `updateMany` 被硬编码成影响 1 行，四条 `count === 0 → 409` 分支从未被执行 | `mockResolvedValueOnce({ count: 0 })` 一行覆盖一条分支；`data-scope.ts` 是纯函数最该表驱动测试；漏斗回放也是纯计算，喂数据断言即可 |
-| **无 CI、无全局异常过滤器** | Prisma 的 `P2002`/`P2003` 会原样冒成 500，而 schema 里有大量刻意不级联的外键 | `PrismaExceptionFilter` 映射 P2002→409 / P2003→409 / P2025→404；补一条跑 `tsc --noEmit + jest + prettier --check` 的 workflow |
+| **无全局异常过滤器** | Prisma 的 `P2002`/`P2003` 会原样冒成 500，而 schema 里有大量刻意不级联的外键 | `PrismaExceptionFilter` 映射 P2002→409 / P2003→409 / P2025→404。CI 已跑 lint、类型检查、测试和构建 |
 | **`analytics` 模块未使用 `CN_TZ_OFFSET_MS`** | 容器默认 UTC，北京时间 00:00–08:00 创建的应聘会落到上一周 / 上一季度的桶里 | 周/季度分桶统一走 `CN_TZ_OFFSET_MS`，与 Offer 有效期、面试禁跨天、合同签署日三处保持同一口径 |
 | **批量移动是串行 N 次全流程** | 100 条上限下最坏约 900 次严格串行查询在一个 HTTP 请求里 | 串行本身是刻意的（部分失败不回滚、错误报告模式），但可改成分批并发；失败时为拿姓名的二次查询应从已有结果里带出 |
 | **撞场检测无时间下界、无 `take`** | 拉出该面试官历史上所有非取消面试再在 JS 里 filter，随职业生涯线性增长 | 加 `scheduledAt: { gte, lte }` 把全表扫变索引范围扫，并给 `Interview` 补对应索引 |
@@ -499,13 +500,12 @@ if (r.count === 0) throw new ConflictException('该 Offer 状态已变更，请�
 
 ### 测试要求
 
-**当前状态（如实说明）**：仓库里只有 4 个 spec 文件，覆盖 Offer 状态机边界、脱敏不变式和工作日推算；前端零测试；尚未接入 CI。乐观锁与数据范围过滤这两块核心逻辑目前**没有测试覆盖**——这是明确的欠账，见 [已知权衡](#️-已知权衡与欠账)。
-
-跑测试（注意要指定 workspace，根目录没有 `test` 脚本）：
+**当前状态（如实说明）**：测试覆盖 Offer 状态机边界、脱敏不变式和工作日推算等纯函数；前端零测试。乐观锁与数据范围过滤这两块核心逻辑目前**没有测试覆盖**——这是明确的欠账，见 [已知权衡](#️-已知权衡与欠账)。推送到 `develop` / `main`（以及指向这两支的 PR）会跑 CI：安装、生成 Prisma Client、lint、类型检查、测试、构建。
 
 ```bash
-npm run test -w apps/api        # Jest
-npm run lint  -w apps/web       # oxlint
+npm test                        # Jest（apps/api）
+npm run lint                    # oxlint（apps/web）
+npm run typecheck               # shared 构建 + api / web 的 tsc
 ```
 
 提 PR 时：

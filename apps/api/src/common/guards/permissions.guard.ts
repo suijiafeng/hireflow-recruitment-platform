@@ -4,7 +4,7 @@ import type { PermissionCode } from '@hireflow/shared';
 import type { JwtUser } from '../decorators/current-user.decorator';
 import { ANY_PERMISSIONS_KEY, PERMISSIONS_KEY } from '../decorators/permissions.decorator';
 
-/** 功能点权限守卫。权限码随 JWT 下发，改动角色权限后需重新登录生效。 */
+/** 功能点权限守卫。权限码由鉴权时按数据库重算，不使用令牌里的旧快照。 */
 @Injectable()
 export class PermissionsGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}

@@ -69,7 +69,7 @@ export class RbacService {
 
   /**
    * 全量替换角色的功能点权限。
-   * 权限随 JWT 下发，调整后相关用户需重新登录方可生效。
+   * 下次请求即按库里的新权限鉴权，不必重新登录。
    */
   async updateRolePermissions(roleId: string, codes: string[], actor: JwtUser) {
     const role = await this.prisma.role.findUnique({

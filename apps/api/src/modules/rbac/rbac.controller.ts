@@ -48,7 +48,7 @@ export class RbacController {
 
   @Patch('roles/:id/permissions')
   @RequirePermissions(PERMISSIONS.CONFIG_MANAGE)
-  @ApiOperation({ summary: '更新角色权限（全量替换；相关用户重新登录后生效）' })
+  @ApiOperation({ summary: '更新角色权限（全量替换；下次请求即生效）' })
   updateRolePermissions(
     @Param('id') id: string,
     @Body() dto: UpdateRolePermissionsDto,
