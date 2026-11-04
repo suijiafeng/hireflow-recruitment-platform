@@ -1,555 +1,297 @@
-# HireFlow · AI-Powered Recruitment Platform
+# HireFlow
 
-> 🚀 开源智能招聘系统（ATS）——以「候选人流转看板」为中枢、「AI Copilot」为差异化、「自动化工作流」贯穿全链路
+把职位、候选人、面试、Offer 和入职放在同一条流程里的全栈招聘系统。界面里的产品名是 **ART 智能招聘**。
 
-[![在线体验](https://img.shields.io/badge/在线体验-demo.suijf.site-2457c5)](https://demo.suijf.site)
-[![Node.js Version](https://img.shields.io/badge/Node.js-%3E%3D20.19-brightgreen)](https://nodejs.org/)
-[![License](https://img.shields.io/badge/License-MIT-blue)](./LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)](./apps/api/tsconfig.json)
-[![Monorepo](https://img.shields.io/badge/Monorepo-npm%20workspaces-333333)](#目录结构)
+[![CI](https://github.com/suijiafeng/hireflow-recruitment-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/suijiafeng/hireflow-recruitment-platform/actions/workflows/ci.yml)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20.19-339933)](./package.json)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-**[👉 在线体验 demo.suijf.site](https://demo.suijf.site)** —— 登录页右侧列出了系统管理员 / HR / 用人经理 / 面试官四个角色的测试账号，用不同角色登录可以直接看出权限与数据范围的差异。
+HireFlow is a full-stack applicant tracking app: a pipeline board in the middle, role-based access around it, and an AI gateway that falls back to a built-in rules engine when no model key is set.
 
-## 数据洞察：TTH 中位数、渠道效能、面试官效能、阶段停留分位
+公开演示站：[demo.suijf.site](https://demo.suijf.site)。下面的截图和账号说明都来自本仓库 `develop` 上 `npm run dev` 拉起的本地种子数据，不是演示站的实时画面。
 
-![数据洞察](./screenshot/insights.jpg)
+## 界面
 
-> 招聘周期 TTH 取**中位数而非均值**（小样本下均值会被个别超长案例带偏）；阶段停留同时给 **P50 与 P90**（P90 才是"最慢的那批人卡在哪"）；渠道效能追踪「投递 → 进面 → Offer → 入职」四段转化，而不只是投递量。
+管理员登录后的首页是数据大盘。下面这张图选中了种子数据里的「高级前端工程师」；没有配置 Anthropic key，诊断卡片标注的是规则引擎。
 
-## 角色与权限：按钮级权限 × 行级数据范围
+![数据大盘：招聘漏斗、投递趋势和规则引擎诊断](./docs/screenshots/dashboard.webp)
 
-![角色与权限](./screenshot/rbac.jpg)
+### 招聘
 
-> 数据范围一列是这套权限模型的核心——同样有「查看候选人」权限，HR 看全部、用人经理看本部门、面试官只看指派给自己的。权限矩阵可在后台可视化编辑并导出。
+![职位管理：在招、待审批和编制进度](./docs/screenshots/jobs.webp)
 
-<details>
-<summary>更多截图（登录页 / 数据大盘）</summary>
+职位列表带状态、编制进度和在流程人数。新建职位会带上默认六段流程：简历初筛、一面、二面、Offer、待入职、已入职。阶段可以按职位改。
 
-![登录](./screenshot/login.jpg)
+![候选人列表和详情抽屉](./docs/screenshots/candidates.webp)
 
-![数据大盘](./screenshot/dashboard.jpg)
+候选人页打开右侧抽屉，而不是跳到单独的详情路由。抽屉里是应聘记录、面评、时间轴，以及安排下一轮、AI 评分、发起 Offer。
 
-</details>
+![招聘看板](./docs/screenshots/pipeline.webp)
 
-## 功能矩阵
+看板按当前职位分列。卡片可以拖到下一阶段；勾选之后可以批量移动、淘汰，或做 AI 对比。
 
-覆盖「职位 → 简历 → 面试 → Offer → 入职」招聘全流程，50+ 个核心功能：
+![面试管理：场次、面评和可约时段](./docs/screenshots/interviews.webp)
 
-### 核心业务模块
+左侧是面试场次和面评结论，右侧是面试官自己的可约时段。候选人可以用免登录链接在这些空档里选时间。
 
-| 模块 | 功能亮点 |
-|-----|--------|
-| **职位管理** | JD AI 生成、自定义流程阶段、岗位评分卡模板、人才库唤醒 |
-| **候选人 360°** | 简历导入/解析（文本/PDF）、语义标签、岗位匹配评分、完整操作时间轴 |
-| **招聘看板** | Pipeline 拖拽、批量操作、AI 候选人对比、预筛三问 |
-| **面试协同** | 面试安排、面试官时段 + 候选人自助选时、结构化面评（AI 草稿） |
-| **Offer 与入职** | 审批流转、免登录 Offer 答复、入职清单、电子合同、入职机器人 |
+### 录用与入职
 
-### 运营智能化
+![录用管理：审批、发送和候选人答复](./docs/screenshots/offers.webp)
 
-| 能力 | 说明 |
-|-----|------|
-| 🤖 **AI Copilot** | JD 生成、简历解析、岗位评分、候选人对比、面评草稿、Offer 留存预测 |
-| 📊 **数据大盘** | 招聘漏斗、AI 健康度诊断、多维洞察（TTH/渠道/面试官/毁约） |
-| 🔐 **权限体系** | 按钮级权限 + 行级数据范围、可视化角色矩阵编辑 |
-| 📋 **合规与审计** | 全实体操作留痕、可追溯的审计日志、符合 GDPR 友好的假删设计 |
-| 🎯 **流程自动化** | 自动化通知、待办中心、入职问答机器人、离线门户 |
+Offer 按审批和答复状态分组。没有 `salary:view` 的角色看不到薪资。候选人链接不会出现在列表里，要点「通知」才会单独取回。
 
-### 候选人免登录门户
+![入职办理：三方清单和待核对材料](./docs/screenshots/onboarding.webp)
 
-凭 token 一键直达，无需注册：
-- **Offer 答复**：查看 Offer、接受/拒绝、答复截止管理
-- **入职资料**：清单进度、证件上传（OCR 自动识别）、电子合同签署
-- **面试自助选时**：在面试官空闲时段中直接预约
-- **预筛问卷**：在线回答期望薪资、到岗时间、出差意愿
+接受 Offer 之后生成入职单。清单按 HR、IT、新员工拆开；材料识别失败时标成待人工核对，不自动勾掉。
 
-## 🛠 技术栈
+![数据洞察：渠道、面试官、阶段停留和 TTH](./docs/screenshots/insights.webp)
 
+洞察页把范围放在「全部」时，能看到渠道漏斗、面试官通过率相对基线的偏离、阶段停留的 P50 / P90，以及按职位的招聘周期中位数。默认打开是「本季度」。
+
+![入职问答：按制度文档回答并标出处](./docs/screenshots/helpdesk.webp)
+
+入职问答对着公司制度文档回答，并标出出处。没配模型 key 时走规则引擎，回答里会说明这一点。
+
+### 手机
+
+Offer 门户不需要登录。下面左图是 375px 宽的整页（内容比一屏略高，所以把答复按钮也收了进来）。右图是同一套后台在 375×812 下的数据大盘：侧栏收成菜单按钮，指标改成两列。
+
+<p>
+  <img alt="候选人 Offer 门户" src="./docs/screenshots/portal-offer.webp" width="375" />
+  <img alt="手机宽度下的数据大盘" src="./docs/screenshots/dashboard-mobile.webp" width="375" />
+</p>
+
+### 同一个地址，两种首页
+
+登录后去菜单里第一个有权限的页面，不固定跳到数据大盘。
+
+管理员有 `dashboard:view`，所以落在上面那张数据大盘，侧栏是全部菜单。面试官只有查看候选人和提交 / 查看面评的权限，首页是候选人，侧栏只剩候选人、面试管理和入职问答。联系方式被打码，列表也只剩指派给自己的人。种子数据里，管理员看到 122 人，这个面试官看到 11 人。
+
+![面试官登录后的候选人列表](./docs/screenshots/landing-interviewer.webp)
+
+IT / 行政只有入职查看权限，首页会落到入职管理。入职问答不设权限，每个登录用户都能打开。
+
+## 功能
+
+**职位和流转。** 职位有草稿、待审批、在招、暂停、关闭。看板拖拽会带上当前卡片的版本号做乐观锁；客户端没传版本号时，这一次移动不做版本检查。预筛有单独的免登录问卷。
+
+**候选人和简历。** 支持粘贴文本，以及上传 PDF、纯文本、Markdown 后抽取正文。其他格式只留档、不抽字。面试官看简历正文时电话和邮箱会打码，也打不开原件。
+
+**面试和 Offer。** 面评可以先让 AI 出草稿，再由面试官改完提交。Offer 走审批、驳回、发送、候选人接受或拒绝。发送后的答复期是 5 个工作日，可以续期一次。接受之后才进入入职。
+
+**入职。** 清单、证件材料和劳动合同分三块。生产环境里，后台代签默认关掉，合同要新员工自己在门户签；需要补录纸质合同时才打开 `ESIGN_STAFF_SIGN`。
+
+**AI。** 网关统一包了 JD 生成、简历解析、岗位匹配、面评草稿、候选人对比、漏斗诊断、入职问答和 Offer 留存预测。`AI_PROVIDER=auto` 且没有 `ANTHROPIC_API_KEY` 时用内置规则引擎。模型调用失败会降级到同一套规则引擎。`parseResume` 和 `scoreMatch` 只在真正走到模型时按内容哈希缓存。
+
+**权限。** 功能权限和数据范围是两条轴。范围有全部、本部门（含下级部门）、仅被指派、仅本人；一个人挂多个角色时取最宽的范围。按钮隐藏只影响界面，接口另有守卫。每次请求都会按数据库里的当前角色和账号状态重算权限，停用和改权限不用等令牌过期。
+
+## 技术栈
+
+| 层 | 选型 |
+| --- | --- |
+| 前端 | React 19、Vite 8、React Router 8、Ant Design 6、TanStack Query、Zustand、dnd-kit |
+| 后端 | NestJS 11、Prisma 7、JWT |
+| 数据库 | 本地 [PGlite](https://pglite.dev)（PostgreSQL 18 的 WASM 构建，数据在 `apps/api/.pgdata/`）；也可以换任意 Postgres |
+| 文件 | S3 兼容存储。本地用 docker compose 里的 MinIO；不启动时上传接口返回 503，其余功能继续可用 |
+| AI | Anthropic SDK，或内置规则引擎 |
+| 共享包 | `packages/shared` 同时产出 CJS 和 ESM，放枚举、权限码和常量 |
+| 仓库 | npm workspaces。Node.js `>=20.19` |
+
+```mermaid
+flowchart LR
+  web["浏览器<br/>apps/web"]
+  api["NestJS API<br/>/api"]
+  db["Postgres<br/>PGlite 或外部库"]
+  s3["S3 / MinIO"]
+  ai["AI 网关"]
+  shared["packages/shared"]
+
+  web -->|"同源 /api"| api
+  shared --> web
+  shared --> api
+  api --> db
+  api --> s3
+  api --> ai
+  ai --> anthropic["Anthropic"]
+  ai --> rules["规则引擎"]
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Frontend (apps/web)                                         │
-│ Vite 8 | React 19 | TypeScript | Ant Design 6              │
-│ react-router 8 | TanStack Query | Zustand | dnd-kit         │
-└─────────────────────────────────────────────────────────────┘
-         ↓ API (http://localhost:3000)
-┌─────────────────────────────────────────────────────────────┐
-│ Backend (apps/api)                                          │
-│ NestJS 11 | Prisma 7 | PostgreSQL 18 | JWT | Swagger Docs   │
-└─────────────────────────────────────────────────────────────┘
-         ↓ Shared (packages/shared)
-         └─ Enums | Permissions | Constants (CJS + ESM)
 
-🤖 AI Gateway: Anthropic SDK + Fallback Rule Engine
-💾 Storage: MinIO (dev) | S3-compatible (prod)
-🗄️ Database: PostgreSQL 18 — PGlite/WASM (dev, 零安装) | 任意 Postgres (prod)
-🐳 Infrastructure: Docker Compose (可选)
-```
+开发时 Vite 把 `/api` 代理到 `localhost:3000`。生产镜像里由 nginx 反代到 `API_ORIGIN`，浏览器仍然访问同源的 `/api`。候选人门户走 `/portal/.../:token`，不经过登录。
 
-| 层 | 技术选型 | 说明 |
-|----|--------|------|
-| **前端** | React 19 + Vite | 快速开发、HMR、优化打包 |
-| **UI 组件** | Ant Design 6 | 企业级组件库、主题定制 |
-| **状态管理** | Zustand + TanStack Query | 轻量级、组合式的状态 + 服务端缓存 |
-| **拖拽** | dnd-kit | 现代、无依赖的拖拽库 |
-| **后端** | NestJS 11 | 模块化、装饰器、内置 RBAC 支持 |
-| **ORM** | Prisma 7 | 类型安全、自动迁移、driver adapter 支持 |
-| **AI** | Anthropic SDK | 结构化输出、多模型支持 |
-| **降级方案** | 内置规则引擎 | API key 缺失/失败自动切换，无人工干预 |
+## 快速开始
 
-## ⚡ 快速开始
-
-### 前置条件
-- Node.js ≥ 20.19
-- npm
-
-**不需要装 Docker，也不需要装 PostgreSQL。** 本地数据库用的是 [PGlite](https://pglite.dev)——把 PostgreSQL 18.3 编译成 WASM，随 `npm install` 一起下载（约 8MB），由 `npm run dev` 自动拉起，数据存在 `apps/api/.pgdata/`。
-
-### 步骤 1：克隆并安装依赖
+需要 Node.js 20.19 或更高，以及 npm。不需要先装 Docker 或 PostgreSQL。
 
 ```bash
 git clone https://github.com/suijiafeng/hireflow-recruitment-platform.git
-cd hireFlow-recruitment-platform
+cd hireflow-recruitment-platform
 npm install
-```
-
-### 步骤 2：配置环境变量
-
-```bash
 cp apps/api/.env.example apps/api/.env
-```
-
-默认值开箱即用，不用改。
-
-### 步骤 3：启动
-
-```bash
 npm run dev
 ```
 
-首次运行会自动建库、跑迁移、灌演示数据（约 6 秒），然后启动：
+`npm run dev` 会先构建 shared、建库并灌种子，然后一起拉起：
 
-```
-db     → PGlite      127.0.0.1:5433
-api    → NestJS      http://localhost:3000
-web    → Vite        http://localhost:5173
-```
+| 进程 | 地址 |
+| --- | --- |
+| PGlite | `127.0.0.1:5433` |
+| API | http://localhost:3000/api ，文档在 http://localhost:3000/api/docs |
+| Vite | http://localhost:5173 |
 
-### 数据库常用命令
+健康检查是 `GET /api/health`。
+
+PGlite 对数据目录没有跨进程锁。`5433` 上已经有实例时，脚本会拒绝再开一个；两个进程同时写同一个 `.pgdata` 会损坏 WAL。需要重来时用 `npm run db:reset`。
+
+### 环境变量
+
+API 读 `apps/api/.env`。下表的默认值就是 `.env.example` 里的值，复制之后可以直接跑本地开发。
+
+| 变量 | 作用 | 默认值 | 是否必须 |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | Prisma 连接串。本地指向 PGlite | `postgresql://postgres:postgres@127.0.0.1:5433/postgres?schema=public` | 是。不设的话 `npm run dev` 会停 |
+| `DATABASE_POOL_MAX` | 连接池上限。PGlite 只有一个会话，必须是 1 | `1` | 本地必须保持 1。换真正的 Postgres 后删掉或调大 |
+| `JWT_SECRET` | 签名密钥 | `change-me-in-production` | 是。`NODE_ENV=production` 时占位符或短于 32 位会拒绝启动 |
+| `JWT_EXPIRES_IN` | 访问令牌有效期 | `12h` | 否 |
+| `AI_PROVIDER` | `auto` / `mock` / `anthropic` | `auto` | 否 |
+| `ANTHROPIC_API_KEY` | 留空则走规则引擎 | 空 | 否 |
+| `ANTHROPIC_MODEL` | 模型名 | `claude-opus-4-8` | 否 |
+| `ANTHROPIC_BASE_URL` | 兼容网关地址 | 空 | 否 |
+| `PORT` | API 端口 | `3000` | 否 |
+| `SWAGGER_ENABLED` | 生产环境是否挂 `/api/docs`。非 production 默认开启 | 未设置 | 否 |
+| `ESIGN_STAFF_SIGN` | 生产环境是否允许后台代签合同 | 未设置 | 否 |
+| `CORS_ORIGINS` | 逗号分隔的跨域白名单。空则不开启 CORS | 空 | 否 |
+| `TRUST_PROXY` | Express `trust proxy`。设置后登录限流才按客户端 IP 计数 | 未设置 | 否 |
+| `S3_ENDPOINT` | 对象存储地址 | `http://localhost:9000` | 否。代码里也有同样的默认值 |
+| `S3_PUBLIC_ENDPOINT` | 浏览器能访问的预签名地址 | 空，则与 `S3_ENDPOINT` 相同 | 否 |
+| `S3_ACCESS_KEY` | 对象存储账号 | `arthr` | 否 |
+| `S3_SECRET_KEY` | 对象存储密码 | `arthr_dev_password` | 否 |
+| `S3_BUCKET` | 桶名。不存在时 API 启动会尝试创建 | `arthr` | 否 |
+| `S3_REGION` | 签名用的 region。示例文件里没有这一项 | 代码默认 `us-east-1` | 否 |
+
+前端另有一个构建期变量 `VITE_DEMO_ACCOUNTS`。不是 `false` 时，登录页会列出下面的测试账号并预填密码。正式部署如果不要这块，构建时设为 `false`。
+
+Web 容器还要 `API_ORIGIN`（镜像默认 `api:3000`），给 nginx 做 `/api` 反代。这不是 API 进程的变量。
+
+### 演示账号
+
+种子密码都是 `Admin@123456`。登录页上列出的是这五个：
+
+| 邮箱 | 角色 | 数据范围 | 登录后的首页 |
+| --- | --- | --- | --- |
+| `admin@arthr.local` | 系统管理员 | 全部 | `/dashboard` |
+| `hr@arthr.local` | HR | 全部 | `/dashboard` |
+| `manager@arthr.local` | 用人经理，挂在技术部 | 本部门及下级 | `/dashboard` |
+| `interviewer@arthr.local` | 面试官 | 指派给自己的 | `/candidates` |
+| `it@arthr.local` | IT / 行政 | 指派给自己的 | `/onboarding` |
+
+种子还会再建四个内部账号（赵磊、钱文、孙丽、周敏），密码相同，用来把面试和部门数据铺开。业务数据只在库里还没有职位时灌入；再跑一遍种子不会覆盖已有职位。
+
+### 常用命令
 
 | 命令 | 作用 |
 | --- | --- |
-| `npm run db:reset` | 删库重建并重新灌演示数据 |
-| `npm run db:import <file.sql>` | 导入 `pg_dump --data-only --inserts` 生成的 SQL（会先清空现有业务数据） |
-| `npm run db:setup` | 只建库/补迁移，不启动服务 |
+| `npm test` | API 的 Jest。当前是 9 个套件、54 个用例 |
+| `npm run lint` | `apps/web` 的 oxlint |
+| `npm run typecheck` | 构建 shared，再对 API 和 Web 跑 `tsc` |
+| `npm run build` | shared、API、Web |
+| `npm run db:setup` | 只建库 / 补迁移，不启动服务 |
+| `npm run db:reset` | 删掉本地库，重新迁移并灌种子 |
+| `npm run db:migrate` | 对 `DATABASE_URL` 执行 `prisma migrate dev` |
+| `npm run db:seed` | 幂等种子 |
+| `npm run db:generate` | 生成 Prisma Client。`npm install`、API 的 build 和 test 也会生成 |
+| `npm run db:import -- <file.sql>` | 导入 `pg_dump --data-only --inserts` 的 SQL |
+| `npm run dev:external-db` | 不启动 PGlite，API 直接连 `DATABASE_URL` |
 
-> **一次只能跑一个。** PGlite 对数据目录没有跨进程锁——两个进程同时打开同一个 `.pgdata` 会写坏 WAL 且不可恢复。脚本会在打开数据目录前先探端口 5433 并拦下，但别绕过它手动起第二个实例。真被写坏了就 `npm run db:reset`。
+推送到 `develop` 或 `main`，以及指向这两支的 PR，会跑 [CI](.github/workflows/ci.yml)：Node 22、`npm ci`、生成 Prisma Client、lint、类型检查、测试、构建。
 
-### 想用真 Postgres？
+### 换真正的 Postgres
 
-用 `docker compose up -d` 起本仓库自带的 Postgres 18 + MinIO（compose 只提供这两个依赖，不含应用），对应连接串是：
+`docker compose up -d` 只启动 Postgres 18 和 MinIO，不启动应用。对应连接串：
 
+```text
+postgresql://arthr:arthr_dev_password@localhost:5432/arthr?schema=public
 ```
-DATABASE_URL="postgresql://arthr:arthr_dev_password@localhost:5432/arthr?schema=public"
-```
 
-把它写进 `apps/api/.env`（换成你自己的 Postgres 也一样，只改这一行），然后：
+把 `DATABASE_URL` 换成它（或你自己的库），删掉或调大 `DATABASE_POOL_MAX`，然后：
 
 ```bash
-docker compose up -d          # 或者用你自己的 Postgres
-npm run db:generate           # 重新生成 Prisma Client（npm install 已生成过；改 schema 后再跑）
-npm run db:migrate            # 建表
-npm run db:seed               # 灌演示数据
-npm run dev:external-db       # 不拉起 PGlite，直连 DATABASE_URL
+docker compose up -d
+npm run db:generate
+npm run db:migrate
+npm run db:seed
+npm run dev:external-db
 ```
 
-> `npm run dev` 那条路径里，建库/迁移/种子由 `db:setup` 自动完成；`dev:external-db` 只启动服务。
-> Prisma Client 在 `npm install` 时生成（`apps/api` 的 build / test 也会再生成一次）。
-> 首次连一个空库时仍要手动 `db:migrate` 和 `db:seed`，否则 API 一查表就报错。库里已有数据时直接起最后一条即可。
+`npm run dev` 会自己做迁移和种子；`dev:external-db` 不会。MinIO 控制台在 http://localhost:9001 ，账号与上面的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 相同。桶不用手建。
 
-MinIO 的 bucket 不用手建，API 启动时不存在会自动创建。
+### 部署
 
-生产环境本来就走这条路（见 [render.yaml](render.yaml)），schema 和迁移完全一致。
+两个镜像分开维护，因为 Render 不能对一个多阶段 Dockerfile 选 target。
 
-### 验证安装
+| 镜像 | 文件 | 运行时 |
+| --- | --- | --- |
+| API | [Dockerfile.api](Dockerfile.api) | Node 22。入口先监听端口，再在后台做 `prisma migrate deploy` 和幂等种子 |
+| Web | [Dockerfile](Dockerfile) | nginx 托管静态文件，并把 `/api` 反代到 `API_ORIGIN` |
 
-| 服务 | 访问地址 | 说明 |
-|-----|--------|------|
-| **应用** | http://localhost:5173 | React 前端应用 |
-| **API 文档** | http://localhost:3000/api/docs | Swagger 交互式文档 |
-| **MinIO 控制台** | http://localhost:9001 | 对象存储管理（账号：请修改为强密码；生产环境请修改） |
+[render.yaml](render.yaml) 是 Render Blueprint：`hireflow-api` 和 `hireflow-web` 两个免费实例，区域新加坡。数据库不在 Blueprint 里，要自己提供 `DATABASE_URL`。不填 S3 变量时，上传不可用，其他接口不受影响。免费实例休眠后，`API_ORIGIN` 需要填 API 的公网地址，填私网地址会一直 502。
 
-### 测试账号
-
-所有测试账号密码统一为 `请修改为强密码`（生产环境请修改）
-
-| 账号 | 角色 | 数据权限 | 场景 |
-|------|-----|--------|------|
-| `admin@arthr.local` | 系统管理员 | 全部数据 | 系统配置、权限管理、部门管理 |
-| `hr@arthr.local` | HR / 招聘专员 | 全部数据 | 职位发布、候选人管理、Offer 发送 |
-| `manager@arthr.local` | 用人经理 | 本部门数据 | 查看部门候选人、审批 Offer |
-| `interviewer@arthr.local` | 面试官 | 被指派的候选人 | 面试安排、面评反馈 |
-| `it@arthr.local` | IT / 行政 | 被指派的任务 | 受限权限演示 |
-
-💡 **提示**：第一次登录时，系统自动创建部门、职位、样本候选人
-
-## 📁 目录结构
-
-```
-hireflow/
-├── apps/
-│   ├── api/                          # 📱 NestJS 后端
-│   │   ├── src/modules/
-│   │   │   ├── auth/                 # JWT 认证、登录
-│   │   │   ├── rbac/                 # 权限体系（角色、权限码、PermissionsGuard）
-│   │   │   ├── departments/          # 部门管理
-│   │   │   ├── jobs/                 # 职位管理、JD AI 生成
-│   │   │   ├── candidates/           # 候选人、简历导入、标签
-│   │   │   ├── applications/         # 投递记录、岗位匹配评分
-│   │   │   ├── interviews/           # 面试安排、面评、选时
-│   │   │   ├── offers/               # Offer 管理、审批流
-│   │   │   ├── onboarding/           # 入职清单、材料收集、电子合同
-│   │   │   ├── helpdesk/             # 入职问答机器人
-│   │   │   ├── notifications/        # 通知中心、待办
-│   │   │   ├── analytics/            # 招聘漏斗、数据洞察、AI 诊断
-│   │   │   ├── activity-log/         # 操作留痕、审计日志
-│   │   │   ├── storage/              # MinIO / S3 文件上传
-│   │   │   └── ai/                   # 🤖 AI 网关（Anthropic SDK + 规则引擎）
-│   │   ├── .env.example              # 环境变量模板
-│   │   └── prisma/schema.prisma      # 数据库 schema
-│   │
-│   └── web/                          # 🎨 React 前端
-│       ├── src/pages/
-│       │   ├── dashboard/            # 📊 数据大盘（漏斗 + 诊断）
-│       │   ├── insights/             # 📈 数据洞察（多维分析）
-│       │   ├── jobs/                 # 💼 职位管理
-│       │   ├── candidates/           # 👥 候选人详情（360° profile）
-│       │   ├── board/                # 📋 招聘看板（拖拽、批量）
-│       │   ├── interviews/           # 🎤 面试协同
-│       │   ├── offers/               # 📄 Offer 与录用
-│       │   ├── onboarding/           # 🎉 入职管理
-│       │   ├── helpdesk/             # 🤖 入职问答
-│       │   ├── settings/             # ⚙️ 权限/角色/部门管理
-│       │   └── portal/               # 🔓 免登录门户（4 页）
-│       └── src/components/           # 共享组件库
-│
-├── packages/
-│   └── shared/                       # 📦 前后端共享
-│       ├── enums/                    # 状态码、职位级别等
-│       ├── permissions/              # 权限码定义
-│       ├── constants/                # 全局常量
-│       └── types/                    # TypeScript 类型
-│
-├── deploy/                           # 🚀 部署文件
-│   ├── nginx/                        # nginx 反代配置
-│   └── api-entrypoint.sh             # Docker 容器启动脚本
-│
-├── docker-compose.yml                # 本地开发基础设施
-├── Dockerfile                        # Web 应用镜像
-├── Dockerfile.api                    # API 应用镜像
-└── render.yaml                       # Render.com Blueprint（一键部署）
-```
-
-## 🤖 AI 能力
-
-**统一 AI 网关** (`apps/api/src/modules/ai/`)：智能降级、完全可解释
-
-### 核心特性
-- ✅ **可降级**：未配置 API key 时自动切换内置规则引擎，全链路可用
-- ✅ **可追溯**：每条 AI 输出都标注 `aiMeta.provider` 来源（Claude/Rule Engine）
-- ✅ **可缓存**：`parseResume` / `scoreMatch` 按内容哈希缓存，避免重复调用
-- ✅ **容错强**：调用失败自动降级，不阻断人工流程
-
-### 启用大模型
-
-在 `apps/api/.env` 配置，重启后生效：
+本地构建镜像：
 
 ```bash
-ANTHROPIC_API_KEY="sk-ant-v7-..."
-ANTHROPIC_MODEL="claude-opus-4-8"    # 精准度最高（推荐）
-# ANTHROPIC_MODEL="claude-haiku-4-5" # 成本最优
+docker build -f Dockerfile.api -t hireflow-api .
+docker build -f Dockerfile -t hireflow-web .
 ```
 
-### AI 功能速览
+应用镜像不会被 `docker compose up` 拉起来。
 
-| 功能 | 应用场景 | 入口位置 |
-|------|--------|--------|
-| 🎯 JD 生成 | 职位信息快速补全 | 职位管理 → 新建 → AI 生成 JD |
-| 📄 简历解析 | 结构化 + 标签 + 摘要 | 候选人详情 → 简历 Tab → AI 解析 |
-| 📊 岗位匹配评分 | 可解释的匹配报告 | 候选人详情 → 应聘记录 → AI 评分 |
-| 🔄 候选人对比 | 多人横向对比分析 | 招聘看板 → 勾选多人 → AI 对比 |
-| ✍️ 面评草稿 | 按评分卡维度自动生成 | 提交面评 → AI Copilot → 生成草稿 |
-| 📈 招聘诊断 | 漏斗瓶颈识别 + AI 建议 | 数据大盘 → 诊断卡片 |
-| 🎁 人才库唤醒 | 历史简历匹配新职位 | 职位管理 → 人才库扫描 |
-| 🎪 Offer 留存预测 | 风险预警气泡 | 录用管理 → Offer 列表 |
+## 目录
 
-## 🚀 部署
-
-### 本地 Docker 部署
-
-```bash
-# 1. 构建镜像
-docker build -f Dockerfile.api -t hireflow-api:latest .
-docker build -f Dockerfile -t hireflow-web:latest .
-
-# 2. 使用 docker-compose 启动全栈
-docker compose -f docker-compose.yml up -d
-
-# 3. 执行数据库迁移（容器内）
-docker exec <api-container-id> npm run db:migrate
-docker exec <api-container-id> npm run db:seed
+```text
+hireflow-recruitment-platform/
+├── apps/api/                 NestJS。模块按 auth、rbac、jobs、candidates、
+│                             applications、interviews、offers、onboarding、
+│                             helpdesk、analytics、notifications、ai、storage 拆开
+├── apps/api/prisma/          schema、迁移、种子
+├── apps/web/src/pages/       登录、大盘、洞察、职位、候选人、看板、面试、
+│                             录用、入职、问答、设置，以及四个免登录门户
+├── apps/web/src/router.tsx   路由级懒加载
+├── packages/shared/          前后端共用的枚举、权限码、常量
+├── deploy/                   nginx 模板和 API 容器入口
+├── docker-compose.yml        仅 Postgres 与 MinIO
+├── Dockerfile                Web 镜像
+├── Dockerfile.api            API 镜像
+└── render.yaml               Render Blueprint
 ```
 
-### 云平台一键部署
+## 实现上值得看的地方
 
-#### Render.com（推荐）
-- **优点**：免费额度充足、自动 HTTPS
-- **数据库**：不由 Blueprint 托管，需自备 Postgres（自建或任意云厂商均可，见下方 `DATABASE_URL` 说明）
-- **步骤**：
-  1. Fork 本仓库到你的 GitHub 账号
-  2. 登录 [Render Dashboard](https://dashboard.render.com)
-  3. 点击 **New** → **Blueprint** → 选择本仓库
-  4. Render 自动创建 2 个服务：`hireflow-api` | `hireflow-web`
-  5. 在 `hireflow-api` 的 Environment 里手动填 `DATABASE_URL`（`sync: false`，控制台填、不进 git）
-  6. 配置其余环境变量（API_ORIGIN、S3 等）后自动部署
+**路由级代码分割。** 页面用 React Router 的 `lazy` 按路由加载，不进首屏包。Vite 再把 `react` / `react-dom`、TanStack Query 和 dayjs 拆成独立块；antd 不打成一整包，Table、DatePicker 跟着用到它们的页面走。
 
-- **运行时注意**：
-  - 免费实例 15 分钟无流量会休眠，仅公网请求可唤醒
-  - `API_ORIGIN` 填 API 服务的公网 URL（nginx 反代已做协议转换）
-  - 若数据库是自建/公网可访问的 Postgres，需要把 Render 的出口 IP 段加入其防火墙 / `pg_hba.conf` 白名单（`hireflow-api` 服务 → **Connect** → **Outbound** 面板可查具体 IP，或见 [Render 官方文档](https://render.com/docs/outbound-ip-addresses)）
-  - 对象存储需单独配置 S3 兼容服务（如 Cloudflare R2）
+**CI 和 Prisma Client。** `develop` 和 `main` 上的 CI 会安装依赖、生成 Client、lint、做类型检查、跑测试并构建。Client 在 `npm install` 时生成，API 的 build 和 test 会再生成一次，所以全新 clone 不用先手跑 `prisma generate`。生成本身不连数据库。
 
-### 环境变量配置
+**登录和会话。** 同一邮箱 15 分钟内失败 5 次锁定；配置了 `TRUST_PROXY` 之后，同一 IP 15 分钟 20 次也锁定。计数在进程内存里，多实例不共享。切换账号或退出时会清掉查询缓存，避免上一个用户的数据留在界面上。主动退出不会把回跳地址带到登录页。
 
-详见 [apps/api/.env.example](apps/api/.env.example)，关键变量：
+**数据和权限。** 面试官视角的电话、邮箱和简历正文会打码。Offer 列表不下发门户 token。分析接口按数据范围过滤，用人经理看不到全公司报表。通知按权限和数据范围投递。
 
-```bash
-# 数据库
-DATABASE_URL="postgresql://user:pass@localhost:5432/hireflow"
+**并发。** 看板移动可以带 `expectedVersion`，冲突返回 409，前端回滚乐观更新。Offer 审批和答复把状态前置条件写进 `updateMany` 的 `WHERE`，用影响行数判断是不是已经被别人改过。
 
-# AI 能力
-ANTHROPIC_API_KEY="sk-ant-..."
-ANTHROPIC_MODEL="claude-opus-4-8"
+**时区。** Offer 的 5 个工作日、可约时段禁止跨天、合同签署日，都按东八区计算。工作日的测试不依赖机器时区。洞察页的周和季度分桶还没有走同一套偏移，容器默认 UTC 时，北京时间凌晨的记录可能进上一个桶。
 
-# 对象存储（S3 兼容）
-S3_ENDPOINT="https://s3.us-west-1.amazonaws.com"
-S3_ACCESS_KEY_ID="..."
-S3_SECRET_ACCESS_KEY="..."
-S3_BUCKET_NAME="hireflow-private"
+## 已知限制
 
-# 应用
-API_ORIGIN="http://localhost:3000"
-FRONTEND_ORIGIN="http://localhost:5173"
-JWT_SECRET="<至少 32 位随机值，如 openssl rand -base64 48 的输出>"  # 生产环境用占位值会拒绝启动
-```
+这些是当前代码里的取舍，不是路线图。仓库里没有对应的开放 issue 来排期。
 
-### Docker 镜像说明
+- 访问令牌 12 小时，没有 refresh，也没有服务端吊销列表。权限和停用在下一次请求生效，令牌在过期前仍然能证明身份。
+- 看板的 `expectedVersion` 是可选字段。不传就退回无版本检查。
+- 门户 token 列本身没有过期时间。Offer 的答复截止是业务字段；面试选时和入职门户的链接发出去之后一直有效，直到被轮换。
+- 登录限流存在单个进程的内存里。
+- 没有把 Prisma 的唯一约束和外键错误映射成 409 / 404 的全局过滤器。
+- 简历抽字只覆盖 PDF 和纯文本。Word 不会被解析。
+- 自动化测试在 API：权限范围、脱敏、门户工作日、登录限流、权限守卫、启动时的密钥检查、规则引擎、Offer 状态机和健康检查。前端没有测试。
+- 候选人和职位可以物理删除。应聘上的淘汰和撤回是状态变更。操作会写入 activity log。
 
-| 镜像 | Dockerfile | 用途 |
-|-----|-----------|------|
-| `hireflow-api` | [Dockerfile.api](Dockerfile.api) | NestJS API 服务 |
-| `hireflow-web` | [Dockerfile](Dockerfile) | React 前端应用（nginx 反代） |
+## 许可证
 
-> **为什么分开？** 因为 Render 目前不支持多阶段 Dockerfile 的 `--target`，所以两个文件分离维护。两者的依赖安装和编译逻辑完全一致，改动时需同步。
+[MIT](./LICENSE)。Copyright (c) 2026 Jiafeng Sui（眭加凤）。
 
-## 📐 设计原则
-
-HireFlow 遵循以下核心设计理念，确保系统稳定、安全、可追溯：
-
-### 1️⃣ 删除克制（Soft Delete）
-- 候选人、投递、Offer、操作记录 **从不物理删除**（满足审计合规要求）
-- 业务上的"删除"建模为状态终结：
-  - 候选人 → `淘汰 + 原因码`
-  - 投递 → `已撤回`
-  - 职位 → `已关闭`
-  - 面试 → `已取消`
-- 完整的时间轴追踪，可追溯、可审计
-
-### 2️⃣ 权限双保险
-```
-前端:  hasPermission() → 按钮显隐（体验层）
-                ↓
-后端:  PermissionsGuard → 请求校验（安全边界）
-```
-- 独立生效，前端隐藏 ≠ 安全验证
-- 任何客户端都需通过后端权限检查
-
-### 3️⃣ 数据范围与功能权限正交
-- **功能权限**：能不能执行某个操作（如"发送 Offer"）
-- **数据范围**：能看到哪些数据行（全部/本部门/仅被指派/仅本人）
-- 两条独立轴线，都随 JWT 下发；多角色时数据范围取并集
-
-### 4️⃣ AI 完全可降级、可解释
-- 缺 API key → 自动降级到内置规则引擎（零人工干预）
-- 调用失败 → 自动重试 + 降级（不阻断业务）
-- 每条输出都标注来源：`aiMeta.provider = "claude"` 或 `"rule-engine"`
-- 没有黑盒判断，所有决策可解释
-
-### 5️⃣ 乐观锁而非悲观锁
-
-**并发控制不是套一个模板，而是逐点选武器。** 全库只有一个 `version` 字段（`Application.version`），因为只有「拖拽看板」这一个场景操作的是 `position` 这种没有状态语义的字段，必须靠版本号。
-
-其余 6 处并发点用的是**状态守卫式 CAS**——把状态的前置条件直接写进 `updateMany` 的 `WHERE`，靠影响行数判定输赢：
-
-```ts
-// Offer 答复：approvalStatus 与 decision 两个维度都不留读写窗口
-const r = await prisma.offer.updateMany({
-  where: { id, approvalStatus: 'SENT', decision: null },
-  data: { decision, decidedAt: new Date() },
-});
-if (r.count === 0) throw new ConflictException('该 Offer 状态已变更，请刷新后重试');
-```
-
-关键差别在于：**状态机校验和并发控制合并成了一次原子写**，而不是「先 `findUnique` 查出来 `if` 一下，再去 `update`」——后者在读和写之间永远有窗口。而且这个 `WHERE` 同时表达了业务规则本身：`decision: null` 既是并发保护，也是「已答复的 Offer 不能再答复」。
-
-冲突统一返回 409，前端 `onMutate` 快照 / `onError` 回滚 / `onSettled` invalidate 三段式处理，409 单独提示「已自动刷新」而非报错。
-
-## ⚖️ 已知权衡与欠账
-
-写在这里而不是等着被发现。以下都是清楚知道、当前有意接受、并且知道正确做法的取舍：
-
-| 现状 | 代价 | 正确做法 |
-|---|---|---|
-| **访问令牌 12h、无 refresh / 黑名单** | 过期前令牌仍能用来认人；停用和改权限在下一次请求生效，但不能立刻作废已发出的令牌 | 短 access token + refresh，或服务端会话黑名单 |
-| **`expectedVersion` 在 DTO 里是可选的** | 客户端不传即退化成无锁——**这是协议性乐观锁，防误操作有效，防恶意无效**；批量移动接口复用单条逻辑但未传版本号，整条路径无锁 | 设为必填，或把 `stageId`（从哪一列来）也钉进 `WHERE`，让「起点」也成为 CAS 条件 |
-| **数据范围的 where 拼装在 6 个 service 里重复 11 处** | 加一档新的数据范围要改 11 个地方；「这个职位是不是我部门的」这个子查询写了三遍，三种错误文案 | 用 Prisma Client Extension 在 ORM 层统一注入范围条件，让「漏加」变成不可能而不是靠自觉；`data-scope.ts` 改 exhaustive switch，新增枚举值不处理直接编译报错 |
-| **门户 token 永不过期、不轮换** | token 在 URL path 段，会进反代日志、浏览器历史、Referer | 加 `expiresAt` 列、重发时轮换、提交后置空、加限流。业务层已有 Offer `expiresAt` 与懒过期，但那是业务过期不是 token 过期 |
-| **测试只有 4 个 spec，且乐观锁本身零覆盖** | 测试里 `updateMany` 被硬编码成影响 1 行，四条 `count === 0 → 409` 分支从未被执行 | `mockResolvedValueOnce({ count: 0 })` 一行覆盖一条分支；`data-scope.ts` 是纯函数最该表驱动测试；漏斗回放也是纯计算，喂数据断言即可 |
-| **无全局异常过滤器** | Prisma 的 `P2002`/`P2003` 会原样冒成 500，而 schema 里有大量刻意不级联的外键 | `PrismaExceptionFilter` 映射 P2002→409 / P2003→409 / P2025→404。CI 已跑 lint、类型检查、测试和构建 |
-| **`analytics` 模块未使用 `CN_TZ_OFFSET_MS`** | 容器默认 UTC，北京时间 00:00–08:00 创建的应聘会落到上一周 / 上一季度的桶里 | 周/季度分桶统一走 `CN_TZ_OFFSET_MS`，与 Offer 有效期、面试禁跨天、合同签署日三处保持同一口径 |
-| **批量移动是串行 N 次全流程** | 100 条上限下最坏约 900 次严格串行查询在一个 HTTP 请求里 | 串行本身是刻意的（部分失败不回滚、错误报告模式），但可改成分批并发；失败时为拿姓名的二次查询应从已有结果里带出 |
-| **撞场检测无时间下界、无 `take`** | 拉出该面试官历史上所有非取消面试再在 JS 里 filter，随职业生涯线性增长 | 加 `scheduledAt: { gte, lte }` 把全表扫变索引范围扫，并给 `Interview` 补对应索引 |
-
-## 📊 功能完成度
-
-| 阶段 | 功能 | 状态 |
-|-----|------|------|
-| **工程骨架** | Monorepo | RBAC | 看板拖拽 | 操作留痕 | ✅ |
-| **一期 MVP** | 职位管理 | 候选人 360° | 面试协同 | 简历导入 | ✅ |
-| **二期 AI 增强** | AI 网关 | JD 生成 | 简历解析 | 岗位评分 | 面评草稿 | ✅ |
-| **三期 自动化** | Offer 审批 | 免登录答复 | 入职清单 | 电子合同 | 入职机器人 | ✅ |
-| **V5 增强** | 批量操作 | 人才库唤醒 | 数据洞察 | 面试自助选时 | 评分卡 | AI 对比 | ✅ |
-| **🚧 规划中** | 去偏见筛选 | Offer 到期邮件提醒 | 漏斗精确回放 | ⏳ |
-
-## 🔓 免登录门户
-
-候选人和新员工凭一次性 token 直达，无需注册账号
-
-| 页面 | 路由 | 功能 | 触发时机 |
-|------|------|------|---------|
-| **Offer 答复** | `/portal/offer/:token` | 查看 Offer、接受/拒绝（支持原因码）、答复截止管理（5 工作日，可续期） | 发送 Offer 时 |
-| **入职资料** | `/portal/onboarding/:token` | 清单进度、证件上传（OCR 自动识别）、电子合同签署 | Offer 已接受 |
-| **面试自助选时** | `/portal/interview/:token` | 在面试官维护的空闲时段中直接预约 | 面试安排待选时 |
-| **预筛问卷** | `/portal/prescreen/:token` | 在线回答期望薪资、到岗时间、出差意愿；HR 收到风险旗标但不自动淘汰 | 发起预筛时 |
-
-## 📈 性能优化
-
-### 前端优化
-- **虚拟滚动**：大列表使用 react-window（候选人列表 1000+ 条秒开）
-- **查询缓存**：TanStack Query 自动缓存 & 智能更新（避免重复请求）
-- **代码分割**：Vite 按路由分割，初始加载 < 300KB
-- **图片优化**：所有头像支持 WebP + 懒加载
-
-### 后端优化
-- **数据库索引**：关键查询列已索引（candidates.created_at / department_id / status）
-- **N+1 查询防护**：Prisma `include` + 数据加载器模式
-- **缓存策略**：AI 结果按内容哈希缓存（`AiCache` 表，同一份简历不重复调用 API）
-- **并发控制**：乐观锁替代悲观锁，减少锁竞争
-
-### 基础设施
-- **CDN**：静态资源（CSS / JS）通过 CDN 分发
-- **gzip 压缩**：API 响应自动压缩（文本减 80%）
-- **连接池**：PostgreSQL 连接池大小 20（开发环境）
-
-## 🤝 贡献指南
-
-我们欢迎所有形式的贡献！无论是功能、bug 修复、文档还是翻译。
-
-### 开发流程
-
-1. **Fork & Clone**
-   ```bash
-   git clone https://github.com/suijiafeng/hireflow-recruitment-platform.git
-   cd hireFlow-recruitment-platform
-   npm install
-   ```
-
-2. **创建功能分支**
-   ```bash
-   git checkout -b feat/your-feature-name
-   # 或 fix/issue-number
-   ```
-
-3. **提交代码**
-   ```bash
-   npm run format                # 格式化代码
-   git commit -m "feat: add xxx"  # 遵循 Conventional Commits
-   git push origin feat/your-feature-name
-   ```
-
-4. **提交 Pull Request**
-   - 描述改动内容、为什么做这个改动
-   - 关联相关的 Issue（如果有）
-   - 等待 Code Review
-
-### 代码规范
-
-- **TypeScript**：严格模式（noImplicitAny / strict）
-- **命名**：驼峰式（变量/函数）、PascalCase（类/组件）
-- **格式化**：运行 `npm run format` 来自动修复
-- **注释**：仅在 WHY 不明显时添加；WHAT 应由代码自说明
-
-### 测试要求
-
-**当前状态（如实说明）**：测试覆盖 Offer 状态机边界、脱敏不变式和工作日推算等纯函数；前端零测试。乐观锁与数据范围过滤这两块核心逻辑目前**没有测试覆盖**——这是明确的欠账，见 [已知权衡](#️-已知权衡与欠账)。推送到 `develop` / `main`（以及指向这两支的 PR）会跑 CI：安装、生成 Prisma Client、lint、类型检查、测试、构建。
-
-```bash
-npm test                        # Jest（apps/api）
-npm run lint                    # oxlint（apps/web）
-npm run typecheck               # shared 构建 + api / web 的 tsc
-```
-
-提 PR 时：
-
-- 改动 `apps/api/src/common/` 下的纯函数（`data-scope` / `mask` / `portal`），请补对应的表驱动测试
-- 改动涉及 `updateMany + count === 0` 的并发分支，请至少补一个 `mockResolvedValueOnce({ count: 0 })` 的用例
-
-### 报告 Bug
-
-如发现 bug，请通过 [Issues](https://github.com/suijiafeng/hireflow-recruitment-platform/issues) 报告，包含：
-- 复现步骤
-- 预期行为 vs 实际行为
-- 环境信息（Node 版本、浏览器等）
-- 错误日志（如有）
-
-## 📚 文档与资源
-
-| 资源 | 链接 |
-|-----|------|
-| **API 文档** | http://localhost:3000/api/docs (Swagger) |
-| **数据库 Schema** | [prisma/schema.prisma](apps/api/prisma/schema.prisma) |
-| **环境变量** | [apps/api/.env.example](apps/api/.env.example) |
-| **部署配置** | [render.yaml](render.yaml) |
-| **业务流程图** | 📋 见 Wiki（待补充） |
-
-## ❓ 常见问题
-
-### Q: 为什么需要配置 AI API key？
-A: AI 功能（如 JD 生成、简历解析）需要调用 Anthropic API。不配置也能使用，系统会自动切换到内置规则引擎（功能有限，但不阻断）。
-
-### Q: MinIO 存储的文件怎么备份？
-A: MinIO 支持 S3 兼容的备份工具。生产环境建议使用云对象存储（AWS S3 / Cloudflare R2）。
-
-### Q: 如何在生产环境中部署？
-A: 参考 [render.yaml](render.yaml) 一键部署，或使用 Docker 自行部署到任何支持容器的平台（AWS ECS / Kubernetes / DigitalOcean 等）。
-
-### Q: 简历解析支持哪些格式？
-A: 支持 PDF、Word (.docx)、纯文本；上传时自动识别。
-
-### Q: 如何修改招聘流程阶段？
-A: 系统管理员可在「设置 → 部门管理」中自定义各部门的招聘流程（如：初审 → 笔试 → 面试 → Offer），不同部门可配置不同阶段。
-
-### Q: 权限体系如何工作？
-A: 系统预置 5 种角色（系统管理员 / HR / 用人经理 / 面试官 / 其他），可视化编辑每个角色的功能权限和数据范围。用户的实际权限是所有角色的并集。
-
----
 > **声明**：本仓库为个人项目，仅供学习交流。
