@@ -11,6 +11,7 @@ import { extractErrorMessage } from '../../api/client';
 import type { Job } from '../../api/types';
 import { RowActions } from '../../components/RowActions';
 import { ScorecardModal } from './ScorecardModal';
+import { JobStagesModal } from './JobStagesModal';
 import { TalentPoolDrawer } from './TalentPoolDrawer';
 import { useAuthStore } from '../../stores/auth';
 import { FormModal } from '../../components/FormModal';
@@ -62,6 +63,7 @@ export function JobsPage() {
   const [editing, setEditing] = useState<Job | null>(null);
   const [talentPoolJob, setTalentPoolJob] = useState<Job | null>(null);
   const [scorecardJob, setScorecardJob] = useState<Job | null>(null);
+  const [stagesJob, setStagesJob] = useState<Job | null>(null);
   const [form] = Form.useForm();
 
   const jobsQuery = useQuery({
@@ -257,6 +259,9 @@ export function JobsPage() {
           <RowActions
             actions={[
               canUpdate ? { key: 'edit', label: '编辑', hint: '编辑职位信息', onClick: () => openEdit(job) } : null,
+              hasPermission(PERMISSIONS.JOB_STAGES_MANAGE)
+                ? { key: 'stages', label: '招聘流程', onClick: () => setStagesJob(job) }
+                : null,
               hasPermission(PERMISSIONS.JOB_DELETE)
                 ? {
                     key: 'delete',
@@ -404,6 +409,7 @@ export function JobsPage() {
 
       <TalentPoolDrawer job={talentPoolJob} onClose={() => setTalentPoolJob(null)} />
       <ScorecardModal job={scorecardJob} onClose={() => setScorecardJob(null)} />
+      {stagesJob && <JobStagesModal key={stagesJob.id} job={stagesJob} onClose={() => setStagesJob(null)} />}
 
       <FormModal form={form}
         className="hf-modal"

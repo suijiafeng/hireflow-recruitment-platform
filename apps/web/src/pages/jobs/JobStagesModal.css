@@ -1,0 +1,31 @@
+.hf-stage-list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+}
+.hf-stage-row {
+  border: 1px solid var(--hf-border, #e5e7eb);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+.hf-stage-row--over {
+  outline: 2px solid var(--hf-primary, #2457c5);
+}
+.hf-stage-row-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  flex-wrap: wrap;
+}
+.hf-stage-handle {
+  touch-action: none;
+  cursor: grab;
+}
+.hf-stage-name {
+  flex: 1;
+  min-width: 140px;
+}
+.hf-stage-name .ant-typography {
+  font-size: var(--fs-xs);
+}

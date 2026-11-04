@@ -61,6 +61,20 @@ export interface Job {
   createdAt: string;
 }
 
+export interface JobStage {
+  id: string;
+  jobId: string;
+  name: string;
+  order: number;
+  _count: { applications: number };
+}
+
+/** 顺序由数组位置决定；新增阶段不传 id。 */
+export interface JobStageInput {
+  id?: string;
+  name: string;
+}
+
 export interface CandidateApplicationBrief {
   id: string;
   job: { id: string; title: string };

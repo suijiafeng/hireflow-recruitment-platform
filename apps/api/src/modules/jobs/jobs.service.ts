@@ -188,10 +188,14 @@ export class JobsService {
    * 传入有 id 的做改名/排序，无 id 的新增；未出现的阶段删除。
    */
   async updateStages(jobId: string, dto: UpdateStagesDto, user: JwtUser) {
-    await this.ensureExists(jobId);
-    const existing = await this.prisma.pipelineStage.findMany({ where: { jobId } });
+    // 写入与读取遵守同一部门范围；功能权限仍由控制器守卫校验。
+    const existing = await this.getStages(jobId, user);
     const existingIds = new Set(existing.map((s) => s.id));
     const incomingIds = new Set(dto.stages.filter((s) => s.id).map((s) => s.id as string));
+
+    if (incomingIds.size !== dto.stages.filter((s) => s.id).length) {
+      throw new BadRequestException('同一阶段不能重复提交');
+    }
 
     for (const item of dto.stages) {
       if (item.id && !existingIds.has(item.id)) {
@@ -224,7 +228,7 @@ export class JobsService {
     await this.activityLog.record(user, ACTIVITY_ACTIONS.STAGES_UPDATED, 'Job', jobId, {
       stages: dto.stages.map((s) => s.name),
     });
-    return this.getStages(jobId);
+    return this.getStages(jobId, user);
   }
 
   /**
