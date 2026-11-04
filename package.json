@@ -12,6 +12,9 @@
   },
   "scripts": {
     "build": "npm run build -w packages/shared && npm run build -w apps/api && npm run build -w apps/web",
+    "lint": "npm run lint -w apps/web",
+    "typecheck": "npm run build -w packages/shared && npm run typecheck -w apps/api && npm run typecheck -w apps/web",
+    "test": "npm run test -w apps/api",
     "build:shared": "npm run build -w packages/shared",
     "dev": "npm run build:shared && npm run db:setup && concurrently -n db,shared,api,web -c yellow,cyan,green,magenta \"npm run db:serve -w apps/api\" \"npm run dev -w packages/shared\" \"npm run dev:wait -w apps/api\" \"npm run dev -w apps/web\"",
     "dev:api": "npm run build:shared && npm run db:setup && concurrently -n db,api -c yellow,green \"npm run db:serve -w apps/api\" \"npm run dev:wait -w apps/api\"",
