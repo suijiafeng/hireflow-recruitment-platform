@@ -3,7 +3,7 @@ dist/
 build/
 *.tsbuildinfo
 
-# prisma 生成的客户端（克隆后先执行 npm run db:generate）
+# prisma 生成的客户端（不入库；npm install 以及 api 的 build / test 会自动 generate）
 apps/api/src/generated/
 
 .env

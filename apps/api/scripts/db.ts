@@ -138,8 +138,8 @@ function prisma(args: string[]): Promise<void> {
 async function setup() {
   const port = dbPort();
   await assertNotRunning(port);
-  // 生成的 client 不进仓库：全新 clone 后 seed 会因缺 src/generated/prisma 直接失败；
-  // 拉了新 schema 的人也需要重新生成。不放 postinstall——Docker 的 deps 层装依赖时还没有 schema。
+  // 生成的 client 不进仓库。install / build / test 会自动 generate；
+  // Docker 的 deps 层此时还没有 schema，postinstall 会跳过，所以这里仍要再生成一次。
   await prisma(['generate']);
   const firstRun = !existsSync(DATA_DIR);
   const db = await open();

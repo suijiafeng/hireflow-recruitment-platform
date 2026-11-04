@@ -4,7 +4,7 @@
   "private": true,
   "description": "HireFlow 后端服务（NestJS）",
   "scripts": {
-    "build": "nest build",
+    "build": "node scripts/generate-client.mjs && nest build",
     "start": "node dist/main",
     "start:dev": "nest start --watch",
     "dev:wait": "tsx scripts/db.ts wait && nest start --watch",
@@ -12,11 +12,13 @@
     "db:serve": "tsx scripts/db.ts serve",
     "db:reset": "tsx scripts/db.ts reset",
     "db:import": "tsx scripts/db.ts import",
-    "db:generate": "prisma generate",
+    "db:generate": "node scripts/generate-client.mjs",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "test": "jest"
+    "postinstall": "node -e \"const fs=require('node:fs');const {spawnSync}=require('node:child_process');if(!fs.existsSync('scripts/generate-client.mjs'))process.exit(0);const r=spawnSync(process.execPath,['scripts/generate-client.mjs'],{stdio:'inherit'});process.exit(r.status==null?1:r.status)\"",
+    "test": "node scripts/generate-client.mjs && jest",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
