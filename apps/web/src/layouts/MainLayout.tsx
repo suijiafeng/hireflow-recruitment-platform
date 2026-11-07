@@ -110,7 +110,17 @@ export function MainLayout() {
 
   // 会话过期（401 清 token）才带 redirect 回跳；主动退出直接去登录页，让下一个账号落到自己的默认菜单
   if (!token) {
-    return <Navigate to={explicitLogout.current ? '/login' : loginUrlFor(location.pathname + location.search)} replace />;
+    return (
+      <div className="loading-center loading-center--lg" role="status">
+        正在返回登录页…
+        {/* 后退可打断尚未提交的跳转；历史位置变化时重新挂载，避免相同目标的 Navigate 不再执行。 */}
+        <Navigate
+          key={location.key}
+          to={explicitLogout.current ? '/login' : loginUrlFor(location.pathname + location.search)}
+          replace
+        />
+      </div>
+    );
   }
 
   const selectedKey = Object.keys(PAGE_TITLES).find((key) => location.pathname.startsWith(key));
