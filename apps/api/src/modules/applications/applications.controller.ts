@@ -5,6 +5,7 @@ import { CurrentUser, type JwtUser } from '../../common/decorators/current-user.
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { ApplicationsService } from './applications.service';
 import { CreateApplicationDto } from './dto/create-application.dto';
+import { CompareApplicationsDto } from './dto/compare-applications.dto';
 import { BatchMoveDto, BatchRejectDto, MoveStageDto, RejectApplicationDto } from './dto/move-stage.dto';
 
 @ApiTags('applications')
@@ -44,8 +45,8 @@ export class ApplicationsController {
   @Post('applications/compare')
   @RequirePermissions(PERMISSIONS.CANDIDATE_READ)
   @ApiOperation({ summary: '候选人对比（2-4 人并排 + AI 综合意见，同职位内）' })
-  compare(@Body() body: { ids: string[] }, @CurrentUser() user: JwtUser) {
-    return this.applicationsService.compare(body.ids ?? [], user);
+  compare(@Body() body: CompareApplicationsDto, @CurrentUser() user: JwtUser) {
+    return this.applicationsService.compare(body.ids, user);
   }
 
   @Post('applications/:id/prescreen-link')

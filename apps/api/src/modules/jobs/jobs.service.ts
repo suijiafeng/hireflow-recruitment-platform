@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ACTIVITY_ACTIONS, DEFAULT_PIPELINE_STAGES } from '@hireflow/shared';
-import { departmentScopeOf, inDepartmentScope } from '../../common/data-scope';
+import { departmentScopeOf, inDepartmentScope, isAssignedScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
 import type { Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
@@ -79,8 +79,7 @@ export class JobsService {
 
   /** 创建职位并生成默认 Pipeline 阶段（骨架期直接置为 OPEN，审批流三期接入） */
   async create(dto: CreateJobDto, user: JwtUser) {
-    const department = await this.prisma.department.findUnique({ where: { id: dto.departmentId } });
-    if (!department) throw new BadRequestException('所属部门不存在');
+    await this.assertDepartmentInScope(dto.departmentId, user);
     if (dto.hiringManagerId) {
       await this.assertManagerActive(dto.hiringManagerId);
     }
@@ -129,7 +128,10 @@ export class JobsService {
   }
 
   async update(id: string, dto: UpdateJobDto, user: JwtUser) {
-    await this.ensureExists(id);
+    const existing = await this.prisma.job.findUnique({ where: { id }, select: { departmentId: true } });
+    if (!existing) throw new NotFoundException('职位不存在');
+    this.assertJobInDeptScope(existing, user);
+    if (dto.departmentId !== undefined) await this.assertDepartmentInScope(dto.departmentId, user);
     if (dto.hiringManagerId) await this.assertManagerActive(dto.hiringManagerId);
     const { scorecardTemplate, ...rest } = dto;
     const job = await this.prisma.job.update({
@@ -238,10 +240,25 @@ export class JobsService {
   async talentPoolScan(jobId: string, user: JwtUser) {
     const job = await this.prisma.job.findUnique({ where: { id: jobId } });
     if (!job) throw new NotFoundException('职位不存在');
+    this.assertJobInDeptScope(job, user);
+
+    // 与候选人列表保持相同范围；共享候选人只要有范围内的应聘即视为可见。
+    const deptScope = departmentScopeOf(user);
+    let candidateScope: Prisma.CandidateWhereInput = {};
+    if (deptScope) {
+      candidateScope = { applications: { some: { job: { departmentId: { in: deptScope } } } } };
+    } else if (isAssignedScope(user)) {
+      candidateScope = {
+        applications: {
+          some: { interviews: { some: { interviewers: { some: { userId: user.sub } } } } },
+        },
+      };
+    }
 
     // 候选池：有淘汰/撤回记录的候选人，排除已在本职位在途/已入职的（避免重复推荐）
     const pool = await this.prisma.candidate.findMany({
       where: {
+        AND: [candidateScope],
         applications: { some: { status: { in: ['REJECTED', 'WITHDRAWN'] } } },
         NOT: { applications: { some: { jobId, status: { in: ['ACTIVE', 'HIRED'] } } } },
       },
@@ -322,9 +339,13 @@ export class JobsService {
     return application;
   }
 
-  private async ensureExists(id: string) {
-    const count = await this.prisma.job.count({ where: { id } });
-    if (count === 0) throw new NotFoundException('职位不存在');
+  private async assertDepartmentInScope(departmentId: string, user: JwtUser) {
+    if (typeof departmentId !== 'string' || !departmentId) {
+      throw new BadRequestException('所属部门不能为空');
+    }
+    const department = await this.prisma.department.findUnique({ where: { id: departmentId } });
+    if (!department) throw new BadRequestException('所属部门不存在');
+    this.assertJobInDeptScope({ departmentId }, user);
   }
 
   /** 部门数据范围校验（用人经理仅本部门职位；ALL scope / 无 user 直接放行） */

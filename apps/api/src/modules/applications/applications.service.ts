@@ -102,6 +102,7 @@ export class ApplicationsService {
       include: { stages: { orderBy: { order: 'asc' } } },
     });
     if (!job) throw new NotFoundException('职位不存在');
+    await this.assertJobDepartmentScope(job.id, user);
     if (job.stages.length === 0) throw new BadRequestException('该职位尚未配置 Pipeline 阶段');
 
     const stage = dto.stageId
@@ -391,9 +392,16 @@ export class ApplicationsService {
    * 数据（匹配分/标签/面评）与 AI 意见分开返回：AI 永远是辅助，终审权在用人经理。
    */
   async compare(ids: string[], user: JwtUser) {
+    // 服务也可能被其他入口调用，不依赖 HTTP DTO 才能拒绝错误类型。
+    if (
+      !Array.isArray(ids) || ids.length < 2 || ids.length > 4 ||
+      ids.some((id) => typeof id !== 'string' || !id.trim())
+    ) {
+      throw new BadRequestException('对比需提供 2-4 个非空的应聘记录 ID');
+    }
     const unique = [...new Set(ids)];
-    if (unique.length < 2 || unique.length > 4) {
-      throw new BadRequestException('对比需选择 2-4 位候选人');
+    if (unique.length !== ids.length) {
+      throw new BadRequestException('对比的应聘记录 ID 不能重复');
     }
     const apps = await this.prisma.application.findMany({
       where: { id: { in: unique } },
