@@ -292,6 +292,6 @@ hireflow-recruitment-platform/
 
 ## 许可证
 
-[MIT](./LICENSE)。Copyright (c) 2026 Jiafeng Sui（眭加凤）。
+[MIT](./LICENSE)。Copyright (c) 2026 suijiafeng。
 
 > **声明**：本仓库为个人项目，仅供学习交流。
