@@ -84,6 +84,91 @@ function FunnelStageRow({
   );
 }
 
+/**
+ * 漏斗三态必须分开，不能共用「去创建职位」：
+ * - 加载：职位列表或漏斗还没返回
+ * - 未选择：已经有职位，但当前还没选定（默认职位要等列表回来才写上）
+ * - 真的没有职位：列表成功且为空，这时才提示去创建
+ * 请求失败单独一档，避免被看成空数据。
+ */
+function FunnelBody({
+  jobsPending,
+  jobsError,
+  onRetryJobs,
+  jobCount,
+  jobId,
+  funnelPending,
+  funnelError,
+  onRetryFunnel,
+  stages,
+  maxReached,
+}: {
+  jobsPending: boolean;
+  jobsError: unknown;
+  onRetryJobs: () => void;
+  jobCount: number | undefined;
+  jobId?: string;
+  funnelPending: boolean;
+  funnelError: unknown;
+  onRetryFunnel: () => void;
+  stages: FunnelStage[];
+  maxReached: number;
+}) {
+  if (jobsPending || funnelPending) {
+    return (
+      <div className="loading-center" role="status">
+        <Spin />
+      </div>
+    );
+  }
+  if (jobsError) {
+    return (
+      <EmptyBlock minHeight={220} description={extractErrorMessage(jobsError, '职位列表没有加载出来，暂时无法展示漏斗')}>
+        <Button size="small" onClick={onRetryJobs}>
+          重试
+        </Button>
+      </EmptyBlock>
+    );
+  }
+  if (jobCount === 0) {
+    return <EmptyBlock minHeight={220} description="暂无职位数据，创建职位后这里将展示招聘漏斗" />;
+  }
+  if (!jobId) {
+    return <EmptyBlock minHeight={220} description="选择一个职位后，这里展示该职位的招聘漏斗" />;
+  }
+  if (funnelError) {
+    return (
+      <EmptyBlock minHeight={220} description={extractErrorMessage(funnelError, '漏斗加载失败，请重试')}>
+        <Button size="small" onClick={onRetryFunnel}>
+          重试
+        </Button>
+      </EmptyBlock>
+    );
+  }
+  if (stages.length === 0) {
+    return <EmptyBlock minHeight={220} description="该职位还没有流程阶段，配置阶段后即可查看漏斗" />;
+  }
+  return (
+    <>
+      <div className="funnel-colhead">
+        <span className="funnel-colhead-plot">到达 / 停留</span>
+        <span>到达</span>
+        <span>停留</span>
+        <span>转化</span>
+      </div>
+      {stages.map((stage, i) => (
+        <FunnelStageRow
+          key={stage.id}
+          stage={stage}
+          prev={i > 0 ? stages[i - 1] : null}
+          max={maxReached}
+          shade={FUNNEL_SHADES[Math.min(i, FUNNEL_SHADES.length - 1)]}
+        />
+      ))}
+    </>
+  );
+}
+
 /** 每个待办都落到「已按该口径筛好」的列表：点 12 就该看到这 12 条，而不是某个职位的看板 */
 const TODO_META = [
   { key: 'newResumes' as const, label: '待处理新简历', link: '/candidates?stage=screening' },
@@ -168,10 +253,12 @@ export function DashboardPage() {
    */
   // 「待处理待办」曾经只取了新简历一项，和标签不符；改为待办条里所有可见项之和
   const todoTotal = Object.values(todosQuery.data ?? {}).reduce<number>((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
+  // 漏斗还没读到时不要把「在流程」画成 0：0 是该职位真的没有人，和「还没选中职位」不是一回事
+  const inFlow = funnelQuery.isSuccess ? stages.reduce((sum, s) => sum + s.current, 0) : null;
   // scope：同一排指标口径不同（全部职位 vs 当前选中职位），在标签下注明，避免把两种数字放在一起比
   const kpis = [
     { label: '在招职位', scope: '全部职位', value: overviewQuery.data?.openJobs ?? 0, unit: '个' },
-    { label: '在流程', scope: '当前职位', value: stages.reduce((sum, s) => sum + s.current, 0), unit: '人' },
+    { label: '在流程', scope: '当前职位', value: inFlow ?? '—', unit: inFlow == null ? '' : '人' },
     { label: '本周新增投递', scope: '全部职位', value: points[points.length - 1]?.applied ?? 0, unit: '份' },
     { label: '本月入职', scope: '全部职位', value: points.slice(-4).reduce((sum, p) => sum + p.hired, 0), unit: '人' },
     { label: '待处理待办', scope: '我的', value: todoTotal, unit: '项' },
@@ -262,31 +349,18 @@ export function DashboardPage() {
               <span className="panel-note">条长 = 累计到达 · 深色段 = 当前停留</span>
             </div>
             <div className="panel-body">
-              {funnelQuery.isLoading ? (
-                <div className="loading-center">
-                  <Spin />
-                </div>
-              ) : stages.length > 0 ? (
-                <>
-                  <div className="funnel-colhead">
-                    <span className="funnel-colhead-plot">到达 / 停留</span>
-                    <span>到达</span>
-                    <span>停留</span>
-                    <span>转化</span>
-                  </div>
-                  {stages.map((stage, i) => (
-                    <FunnelStageRow
-                      key={stage.id}
-                      stage={stage}
-                      prev={i > 0 ? stages[i - 1] : null}
-                      max={maxReached}
-                      shade={FUNNEL_SHADES[Math.min(i, FUNNEL_SHADES.length - 1)]}
-                    />
-                  ))}
-                </>
-              ) : (
-                <EmptyBlock minHeight={220} description="暂无职位数据，创建职位后这里将展示招聘漏斗" />
-              )}
+              <FunnelBody
+                jobsPending={jobsQuery.isPending}
+                jobsError={jobsQuery.isError ? jobsQuery.error : null}
+                onRetryJobs={() => void jobsQuery.refetch()}
+                jobCount={jobsQuery.data?.items.length}
+                jobId={jobId}
+                funnelPending={Boolean(jobId) && funnelQuery.isPending}
+                funnelError={funnelQuery.isError ? funnelQuery.error : null}
+                onRetryFunnel={() => void funnelQuery.refetch()}
+                stages={stages}
+                maxReached={maxReached}
+              />
             </div>
           </Card>
 

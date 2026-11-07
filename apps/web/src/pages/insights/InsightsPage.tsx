@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import { analyticsApi, departmentsApi } from '../../api';
 import type { InsightsRange } from '../../api/types';
 import { SERIES } from '../../components/charts';
+import { QueryErrorResult } from '../../components/QueryErrorResult';
 import { EmptyBlock } from '../../components/ui';
 import { downloadCsv } from '../../utils/csv';
 import { useUrlState } from '../../hooks/useUrlState';
@@ -71,7 +72,7 @@ export function InsightsPage() {
     },
     {
       label: '毁约率',
-      value: `${data?.offer.renegeRate ?? 0}%`,
+      value: data?.offer.renegeRate != null ? `${data.offer.renegeRate}%` : '—',
       unit: '',
       note: `${data?.offer.renegeCount ?? 0} 人`,
     },
@@ -183,6 +184,14 @@ export function InsightsPage() {
       </div>
 
       <div className="hf-body">
+        {query.isError ? (
+          <QueryErrorResult error={query.error} onRetry={() => void query.refetch()} />
+        ) : query.isPending ? (
+          <div className="hf-state-block">
+            <Spin />
+          </div>
+        ) : (
+        <>
         <div className="hf-kpis">
           {kpis.map((k) => (
             <div className="hf-kpi" key={k.label}>
@@ -402,6 +411,8 @@ export function InsightsPage() {
               </div>
             </div>
           </div>
+        )}
+        </>
         )}
       </div>
     </div>

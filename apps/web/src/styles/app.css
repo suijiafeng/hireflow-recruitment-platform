@@ -2321,6 +2321,29 @@
   min-height: 300px;
 }
 
+/* 路由 chunk / 渲染失败：主布局内或整页都居中，按钮在窄屏换行，不把英文堆栈露给用户 */
+.route-error {
+  min-height: 60vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  box-sizing: border-box;
+}
+.route-error .ant-result {
+  padding: 24px 8px;
+  max-width: 520px;
+}
+.route-error .ant-result-extra {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.route-error .ant-result-extra .ant-btn {
+  margin-inline-start: 0 !important;
+}
+
 /* ============================================================
    数据大盘（Dashboard）样式
    ============================================================ */
@@ -4525,9 +4548,9 @@
   .hf-kpi:nth-last-child(-n + 2),
   .kpi-cell:nth-last-child(-n + 2) { border-bottom: none; }
 
-  /* 待办条：标签换行，数字和名称各占一行 */
-  .todo-strip { flex-wrap: wrap; height: auto; }
-  .todo-strip-items { flex-wrap: wrap; }
+  /* 待办条：标题独占一行，下面两列，避免「待办」把标签挤成断字 */
+  .todo-strip { flex-direction: column; align-items: stretch; height: auto; }
+  .todo-strip-items { flex-wrap: wrap; width: 100%; }
   .todo-strip-item { flex: 1 1 50%; min-width: 50%; }
   .todo-strip-label { white-space: normal; }
 
@@ -4537,7 +4560,10 @@
   .panel-title,
   .hf-panel-title { white-space: nowrap; }
   .dashboard-bar { height: auto; min-height: 56px; flex-wrap: wrap; row-gap: 8px; padding: 8px 12px; }
-  .dashboard-bar .w-260 { width: 100%; }
+  .dashboard-bar-left { flex-wrap: wrap; flex: 1 1 100%; }
+  .dashboard-bar .w-260,
+  .dashboard-updated { flex: 1 1 100%; width: 100%; }
+  .kpi-scope { display: block; margin-left: 0; }
   .dashboard-body,
   .hf-body { padding: 12px; }
 
@@ -4635,8 +4661,9 @@
   background-attachment: local, local, scroll, scroll;
 }
 
-/* 1024 宽下待办一行放不下六项，末项被截断：改为可换行 */
-@media (max-width: 1279px) {
+/* 1024 宽下待办一行放不下六项，末项被截断：改为可换行。
+   不能用 max-width:1279 单独写，否则会盖住手机上的两列规则，标签被挤成竖排。 */
+@media (max-width: 1279px) and (min-width: 768px) {
   .todo-strip { height: auto; }
   .todo-strip-items { flex-wrap: wrap; }
   .todo-strip-item { flex: 1 1 33%; min-width: 33%; }
