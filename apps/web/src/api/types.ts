@@ -434,6 +434,7 @@ export interface InterviewPortalView {
   durationMins: number;
   scheduledAt: string | null;
   status: string;
+  closed?: boolean;
   slots: Array<{ id: string; startAt: string; endAt: string }>;
 }
 

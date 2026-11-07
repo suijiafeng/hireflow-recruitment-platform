@@ -195,8 +195,8 @@ export const portalApi = {
     http.post<OnboardingPortalView>(`/portal/onboardings/${token}/contract/sign`).then((r) => r.data),
   interviewView: (token: string) =>
     http.get<InterviewPortalView>(`/portal/interviews/${token}`).then((r) => r.data),
-  interviewPick: (token: string, slotId: string) =>
-    http.post<InterviewPortalView>(`/portal/interviews/${token}/pick`, { slotId }).then((r) => r.data),
+  interviewPick: (token: string, slotId: string, startAt?: string) =>
+    http.post<InterviewPortalView>(`/portal/interviews/${token}/pick`, { slotId, startAt }).then((r) => r.data),
   prescreenView: (token: string) =>
     http.get<PrescreenView>(`/portal/prescreen/${token}`).then((r) => r.data),
   prescreenSubmit: (

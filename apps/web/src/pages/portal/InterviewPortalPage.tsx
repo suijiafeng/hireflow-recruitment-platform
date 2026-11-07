@@ -53,7 +53,7 @@ export function InterviewPortalPage() {
   const { token = '' } = useParams();
   const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
-  const [slotId, setSlotId] = useState<string | null>(null);
+  const [slotKey, setSlotKey] = useState<string | null>(null);
 
   const viewQuery = useQuery({
     queryKey: ['portal-interview', token],
@@ -63,7 +63,7 @@ export function InterviewPortalPage() {
   });
 
   const pickMutation = useMutation({
-    mutationFn: (id: string) => portalApi.interviewPick(token, id),
+    mutationFn: (slot: { id: string; startAt: string }) => portalApi.interviewPick(token, slot.id, slot.startAt),
     onSuccess: (data) => {
       queryClient.setQueryData(['portal-interview', token], data);
       message.success('面试时间已确认，请准时参加！');
@@ -72,7 +72,7 @@ export function InterviewPortalPage() {
       /** 并发抢占（409）：刷新剩余时段供重选 */
       if ((error as AxiosError)?.response?.status === 409) {
         message.warning('该时段刚被约走，已为您刷新剩余时段');
-        setSlotId(null);
+        setSlotKey(null);
         void queryClient.invalidateQueries({ queryKey: ['portal-interview', token] });
       } else {
         message.error(extractErrorMessage(error, '确认失败，请稍后重试'));
@@ -114,6 +114,13 @@ export function InterviewPortalPage() {
       </PortalShell>
     );
 
+  if (view.closed)
+    return (
+      <PortalShell title="面试选时已结束" desc="本场面试目前不能选择时间，请联系 HR 了解后续安排。">
+        <div className="hf-secondary">{view.jobTitle} · 第 {view.round} 轮</div>
+      </PortalShell>
+    );
+
   if (view.scheduledAt)
     return (
       <PortalShell title="面试时间已确认" desc="如需改期请联系 HR。">
@@ -141,7 +148,7 @@ export function InterviewPortalPage() {
       else groups.push({ key, dow: dayjs(s.startAt).format('ddd'), items: [s] });
     });
 
-  const picked = view.slots.find((s) => s.id === slotId);
+  const picked = view.slots.find((s) => `${s.id}:${s.startAt}` === slotKey);
 
   return (
     <PortalShell
@@ -161,14 +168,14 @@ export function InterviewPortalPage() {
           <Button
             type="primary"
             block
-            disabled={!slotId}
+            disabled={!picked}
             loading={pickMutation.isPending}
             onClick={() =>
               modal.confirm({
                 title: '确认这个面试时间？',
                 content: '确认后将同步面试官日程；如需再改期请联系 HR。',
                 okText: '确认时间',
-                onOk: () => pickMutation.mutateAsync(slotId!),
+                onOk: () => picked && pickMutation.mutateAsync(picked),
               })
             }
           >
@@ -198,9 +205,10 @@ export function InterviewPortalPage() {
               const end = dayjs(s.endAt);
               /** 跨天时补日期，避免渲染成误导性的「23:00 – 01:00」 */
               const endLabel = end.isSame(start, 'day') ? end.format('HH:mm') : end.format('MM-DD HH:mm');
-              const on = slotId === s.id;
+              const key = `${s.id}:${s.startAt}`;
+              const on = slotKey === key;
               return (
-                <div key={s.id} className={on ? 'hf-opt hf-opt--on' : 'hf-opt'} {...pressable(() => setSlotId(s.id))}>
+                <div key={key} className={on ? 'hf-opt hf-opt--on' : 'hf-opt'} {...pressable(() => setSlotKey(key))}>
                   <span className="hf-opt-mark">{on ? <CheckOutlined /> : null}</span>
                   <span className="hf-td--num">
                     {start.format('HH:mm')} – {endLabel}

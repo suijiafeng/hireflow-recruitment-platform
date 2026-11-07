@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { InterviewsService } from './interviews.service';
+import { PickInterviewSlotDto } from './dto/pick-interview-slot.dto';
 
 /**
  * 候选人自助选时门户：
@@ -21,7 +22,7 @@ export class InterviewPortalController {
 
   @Post(':token/pick')
   @ApiOperation({ summary: '候选人确认时段（并发抢占返回 409 重选）' })
-  pick(@Param('token') token: string, @Body() body: { slotId: string }) {
-    return this.interviewsService.portalPick(token, body.slotId);
+  pick(@Param('token') token: string, @Body() body: PickInterviewSlotDto) {
+    return this.interviewsService.portalPick(token, body.slotId, body.startAt);
   }
 }
