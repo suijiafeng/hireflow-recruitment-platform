@@ -9,6 +9,7 @@ import {
 import { ACTIVITY_ACTIONS, RoleCode } from '@hireflow/shared';
 import { departmentScopeOf, isAssignedScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
+import { assertResumeFile } from '../../common/upload';
 import { maskContactsDeep, maskContactsInText, maskEmail, maskPhone } from '../../common/mask';
 import type { Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
@@ -227,6 +228,7 @@ export class CandidatesService {
   }
 
   async update(id: string, dto: Partial<CreateCandidateDto>, user: JwtUser) {
+    await this.assertCandidateInScope(id, user);
     const exists = await this.prisma.candidate.count({ where: { id } });
     if (exists === 0) throw new NotFoundException('候选人不存在');
     const candidate = await this.prisma.candidate.update({ where: { id }, data: dto });
@@ -269,11 +271,13 @@ export class CandidatesService {
       include: { candidate: true },
     });
     if (!resume) throw new NotFoundException('简历不存在');
-    if (!resume.rawText) throw new BadRequestException('该简历没有可解析的文本内容');
+    await this.assertCandidateInScope(resume.candidateId, user);
+    const rawText = resume.rawText?.trim();
+    if (!rawText) throw new BadRequestException('该简历没有可解析的文本内容');
 
     await this.prisma.resume.update({ where: { id: resumeId }, data: { parseStatus: 'PARSING' } });
     try {
-      const { data, meta } = await this.ai.parseResume(resume.rawText);
+      const { data, meta } = await this.ai.parseResume(rawText);
       const mergedTags = [...new Set([...resume.candidate.tags, ...data.skills])].slice(0, 15);
 
       const [updatedResume] = await this.prisma.$transaction([
@@ -304,12 +308,15 @@ export class CandidatesService {
 
   /** 文本导入一份简历（导入后可调用 /resumes/:id/parse 做 AI 解析） */
   async addResume(candidateId: string, dto: AddResumeDto, user: JwtUser) {
+    await this.assertCandidateInScope(candidateId, user);
+    const rawText = typeof dto.rawText === 'string' ? dto.rawText.trim() : '';
+    if (rawText.length < 20) throw new BadRequestException('简历文本过短');
     const candidate = await this.prisma.candidate.findUnique({ where: { id: candidateId } });
     if (!candidate) throw new NotFoundException('候选人不存在');
     const resume = await this.prisma.resume.create({
       data: {
         candidateId,
-        rawText: dto.rawText,
+        rawText,
         fileName: dto.fileName ?? `${candidate.name}-简历.txt`,
         parseStatus: 'PENDING',
       },
@@ -317,7 +324,7 @@ export class CandidatesService {
     await this.activityLog.record(user, ACTIVITY_ACTIONS.RESUME_ADDED, 'Candidate', candidateId, {
       resumeId: resume.id,
       fileName: resume.fileName,
-      length: dto.rawText.length,
+      length: rawText.length,
     });
     return resume;
   }
@@ -327,8 +334,10 @@ export class CandidatesService {
    * 抽不出文字的格式（扫描件/Word）留档后由 HR 粘贴文本补充（人工兜底）。
    */
   async addResumeFile(candidateId: string, file: Express.Multer.File, user: JwtUser) {
+    await this.assertCandidateInScope(candidateId, user);
     const candidate = await this.prisma.candidate.findUnique({ where: { id: candidateId } });
     if (!candidate) throw new NotFoundException('候选人不存在');
+    assertResumeFile(file);
 
     const fileName = Buffer.from(file.originalname, 'latin1').toString('utf8'); // multer 中文名乱码修正
     const fileKey = this.storage.objectKey(`resumes/${candidateId}`, fileName);
@@ -353,7 +362,7 @@ export class CandidatesService {
     return { ...resume, textExtracted: Boolean(rawText) };
   }
 
-  /** 简历原件预览链接（预签名，10 分钟有效） */
+  /** 简历原件下载链接：历史文件未必经过内容校验，一律用 attachment 避免当网页预览。 */
   async resumeFileUrl(resumeId: string, user: JwtUser) {
     const resume = await this.prisma.resume.findUnique({
       where: { id: resumeId },
@@ -366,7 +375,7 @@ export class CandidatesService {
       throw new ForbiddenException('简历原件含候选人联系方式，面试官视角仅可查看正文');
     }
     if (!resume.fileKey) throw new NotFoundException('该简历为文本导入，无原件文件');
-    return { url: await this.storage.presignedGetUrl(resume.fileKey, resume.fileName ?? undefined) };
+    return { url: await this.storage.presignedGetUrl(resume.fileKey, resume.fileName ?? undefined, 600, 'attachment') };
   }
 
   /** PDF / 纯文本抽取文字；其余格式返回 null（留档不解析） */

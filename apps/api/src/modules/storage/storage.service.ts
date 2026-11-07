@@ -89,14 +89,20 @@ export class StorageService implements OnModuleInit {
   }
 
   /** 预签名下载/预览链接（默认 10 分钟有效，浏览器直连 MinIO，不过 API 转发） */
-  async presignedGetUrl(key: string, fileName?: string, expiresInSeconds = 600): Promise<string> {
+  async presignedGetUrl(
+    key: string,
+    fileName?: string,
+    expiresInSeconds = 600,
+    disposition: 'inline' | 'attachment' = 'inline',
+  ): Promise<string> {
     this.ensureAvailable();
     const command = new GetObjectCommand({
       Bucket: this.bucket,
       Key: key,
-      ...(fileName
-        ? { ResponseContentDisposition: `inline; filename*=UTF-8''${encodeURIComponent(fileName)}` }
-        : {}),
+      ResponseContentDisposition: fileName
+        ? `${disposition}; filename*=UTF-8''${encodeURIComponent(fileName)}`
+        : disposition,
+      ...(disposition === 'attachment' ? { ResponseContentType: 'application/octet-stream' } : {}),
     });
     return getSignedUrl(this.presignClient, command, { expiresIn: expiresInSeconds });
   }

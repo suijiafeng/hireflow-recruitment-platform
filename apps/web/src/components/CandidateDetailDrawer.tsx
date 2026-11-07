@@ -623,7 +623,7 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                                 .catch((error) => message.error(extractErrorMessage(error, '获取原件链接失败')))
                             )}
                           >
-                            <PaperClipOutlined /> 原件
+                            <PaperClipOutlined /> 下载原件
                           </span>
                         )}
                         {resume.rawText && hasPermission(PERMISSIONS.CANDIDATE_UPDATE) && (
