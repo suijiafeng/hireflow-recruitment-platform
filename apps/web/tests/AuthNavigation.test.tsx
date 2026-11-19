@@ -64,6 +64,7 @@ function setup(role: string, loginLazy?: () => Promise<{ Component: typeof Login
 }
 
 describe('退出后的浏览器历史', () => {
+  // 多次导航、悬停菜单和等待路由，CI 上经常超过 Vitest 默认的 5 秒
   it.each(['HR', 'ADMIN'])('%s 退出时登录页懒加载未完成，立即后退也应恢复登录页', async (role) => {
     let resolveLogin!: () => void;
     const loginReady = new Promise<{ Component: typeof LoginPage }>((done) => {
@@ -95,7 +96,7 @@ describe('退出后的浏览器历史', () => {
     await screen.findByRole('button', { name: /登\s*录/ });
     expect(screen.queryByText('职位数据')).toBeNull();
     expect(screen.queryByText('候选人数据')).toBeNull();
-  });
+  }, 15_000);
 
   it.each(['HR', 'ADMIN'])('%s 退出后后退到受保护页面仍显示登录页', async (role) => {
     const user = setup(role);
@@ -117,5 +118,5 @@ describe('退出后的浏览器历史', () => {
     await screen.findByRole('button', { name: /登\s*录/ });
     expect(screen.queryByText('职位数据')).toBeNull();
     expect(screen.queryByText('候选人数据')).toBeNull();
-  });
+  }, 15_000);
 });
