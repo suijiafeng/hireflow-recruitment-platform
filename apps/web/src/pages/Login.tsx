@@ -1,4 +1,4 @@
-import { EyeInvisibleOutlined, EyeTwoTone, LockOutlined, MailOutlined, RocketOutlined } from '@ant-design/icons';
+import { EyeInvisibleOutlined, EyeTwoTone, LockOutlined, MailOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Alert, App, Button, Card, Form, Input } from 'antd';
 import { Navigate, useNavigate, useSearchParams } from 'react-router';
@@ -12,9 +12,9 @@ import { useAuthStore } from '../stores/auth';
 
 /** 卖点：编号 + 发丝分隔行（不用彩色图标方块，色彩留给数据与状态） */
 const FEATURES = [
-  { no: '01', title: 'AI 智能解析', desc: '上传即结构化：技能标签、岗位匹配分与依据一并给出' },
-  { no: '02', title: '数据驱动决策', desc: '漏斗瓶颈、渠道质量、面试官偏差，一屏可查' },
-  { no: '03', title: '协同招聘流程', desc: '看板流转、面试协同、面评归档，全程留痕可追溯' },
+  { no: '01', title: '简历解析', desc: '上传后抽出技能、经历和匹配分，并写明依据' },
+  { no: '02', title: '漏斗复盘', desc: '按职位看到达、停留和流失，瓶颈落在哪一段' },
+  { no: '03', title: '面试留痕', desc: '排期、面评和录用审批按时间记下，之后能回看' },
 ];
 
 /** 开发环境测试账号：点一行直接填入表单，替代原来的 emoji 提示块 */
@@ -66,22 +66,22 @@ export function LoginPage() {
         {/* 品牌面板：logo / 主张 / 卖点 / 页脚，四段垂直分布 */}
         <div className="login-brand-side">
           <div className="login-brand-logo">
-            <div className="login-brand-logo-mark">
-              <RocketOutlined />
+            <div className="login-brand-logo-mark" aria-hidden="true">
+              A
             </div>
             <div className="login-brand-logo-text">
               <h1>ART 智能招聘</h1>
-              <p>AI Recruiting</p>
+              <p>招聘工作台</p>
             </div>
           </div>
 
           <div className="login-brand-hero">
             <h2>
-              让每一次筛选
+              筛选要有依据
               <br />
-              都有据可依
+              决定仍由你做
             </h2>
-            <p>从简历解析到面评归档，全流程留痕；AI 只给建议与依据，决定权始终在你手上。</p>
+            <p>简历解析、面试排期、面评和录用审批留在同一条记录里。模型只给建议和依据。</p>
 
             <div className="login-brand-features">
               {FEATURES.map((f) => (
@@ -98,8 +98,7 @@ export function LoginPage() {
 
           <div className="login-brand-meta">
             <span>© 2026 ART 智能招聘</span>
-            <span>50+ 招聘全流程能力</span>
-            <span>操作全程留痕 · GDPR 友好</span>
+            <span>简历 · 面试 · 录用 · 入职</span>
           </div>
         </div>
 

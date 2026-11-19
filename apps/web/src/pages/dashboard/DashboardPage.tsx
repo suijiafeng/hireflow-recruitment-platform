@@ -1,7 +1,6 @@
 import { ReloadOutlined, RobotOutlined } from '@ant-design/icons';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { App, Button, Card, Select, Spin, Tooltip, Typography } from 'antd';
-import type { CSSProperties } from 'react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import dayjs from 'dayjs';
@@ -15,10 +14,8 @@ import { pickDefaultJobId } from '../../utils/jobs';
 import { useUrlState } from '../../hooks/useUrlState';
 import { pressable } from '../../utils/pressable';
 
-const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
-
-/** 有序阶梯：阶段越靠后颜色越深（位置编码次序，深浅编码进度） */
-const FUNNEL_SHADES = ['#93C5FD', '#7DB1FB', '#60A5FA', '#3B82F6', '#2563EB', '#1E40AF'];
+/** 漏斗阶梯：越往后越深，同一墨色，不另开色相 */
+const FUNNEL_SHADES = ['#E4E4E7', '#D4D4D8', '#A1A1AA', '#71717A', '#52525B', '#18181B'];
 
 /**
  * 漏斗阶段行：条长 = 累计到达，条内深色段 = 当前停留；
@@ -62,9 +59,11 @@ function FunnelStageRow({
         <div className="funnel-row" tabIndex={0}>
           <span className="funnel-label">{stage.name}</span>
           <div className="funnel-track">
-            <div className="funnel-bar" style={cssVars({ '--w': `${widthPct}%`, '--c': shade })}>
-              <span className="funnel-bar-stay" style={cssVars({ '--sw': `${stayPct}%` })} />
-            </div>
+            <svg className="funnel-svg" viewBox="0 0 100 16" preserveAspectRatio="none" aria-hidden="true">
+              <line className="chart-svg-base" x1="0" x2="100" y1="15.5" y2="15.5" />
+              <rect x="0" y="3" width={widthPct} height="10" fill={shade} />
+              <rect x="0" y="3" width={(widthPct * stayPct) / 100} height="10" fill="rgba(24, 24, 27, 0.45)" />
+            </svg>
           </div>
           <span className="funnel-num">{stage.reached}</span>
           <span className="funnel-num funnel-num--soft">{stage.current}</span>
@@ -311,7 +310,11 @@ export function DashboardPage() {
             }}
             options={jobOptions}
           />
-          <span className="dashboard-updated">数据截至 {dayjs().format('MM-DD HH:mm')} · 每 10 分钟刷新</span>
+          <span className="dashboard-updated">
+            {overviewQuery.dataUpdatedAt
+              ? `更新于 ${dayjs(overviewQuery.dataUpdatedAt).format('YYYY-MM-DD HH:mm:ss')}`
+              : '正在读取'}
+          </span>
         </div>
         <span className="u-flex-gap-8">
           <Button icon={<ReloadOutlined />} onClick={() => void funnelQuery.refetch()} loading={funnelQuery.isFetching}>
@@ -373,8 +376,8 @@ export function DashboardPage() {
                 <TrendChart
                   data={points.map((p) => ({ x: p.week, values: { applied: p.applied, hired: p.hired } }))}
                   series={[
-                    { key: 'applied', label: '新增投递', color: SERIES.blue },
-                    { key: 'hired', label: '入职闭环', color: SERIES.aqua },
+                    { key: 'applied', label: '新增投递', color: SERIES.ink },
+                    { key: 'hired', label: '入职闭环', color: SERIES.mist },
                   ]}
                 />
               </div>
@@ -411,7 +414,7 @@ export function DashboardPage() {
                     </Typography.Text>
                   </>
                 ) : (
-                  <EmptyBlock minHeight={140} description="选择职位后点击「生成诊断」，AI 将基于漏斗数据输出瓶颈与建议" />
+                  <EmptyBlock minHeight={140} description="选择职位后点「生成诊断」，按当前漏斗写出瓶颈和建议" />
                 )}
               </div>
             </Card>

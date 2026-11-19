@@ -1,10 +1,6 @@
 /* ============================================================
-   图表样式（dataviz 规范）- 现代蓝紫品牌色系
-   - 条形 ≤24px，数据端 4px 圆角、基线端直角
-   - 折线 2px 圆角端点；端点 ≥8px 带 2px 表面色描边环
-   - 网格线 1px 实线浅灰，退居背景
-   - 文字一律用文本色阶，系列色只上到图形本身
-   - 数据驱动的宽度/坐标/系列色经 CSS 变量传入（--w/--x/--c 等）
+   图表样式：墨色阶梯，水平虚线网格，刻度 12px 等宽。
+   折线 1.75px，无面积、无发光、无悬停放大。
    ============================================================ */
 
 .chart {
@@ -117,7 +113,7 @@
   height: 16px;
   width: var(--w);
   min-width: 2px;
-  background: var(--c, #2563EB);
+  background: var(--c, #18181B);
   border-radius: 0 4px 4px 0; /* 数据端圆角，基线端直角 */
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
@@ -220,7 +216,7 @@
   height: 2px;
   transform: translateY(-50%);
   border-radius: 4px;
-  background: var(--c, #2563EB);
+  background: var(--c, #18181B);
 }
 .chart-lolli-dot {
   position: absolute;
@@ -230,9 +226,9 @@
   height: 12px;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  background: var(--c, #2563EB);
-  box-shadow: 0 0 0 3px var(--chart-surface), 0 2px 6px rgba(37, 99, 235, 0.2);
-  transition: all 0.2s ease;
+  background: var(--c, #18181B);
+  box-shadow: 0 0 0 3px var(--chart-surface), 0 2px 6px rgba(24, 24, 27, 0.2);
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .chart-row:hover .chart-lolli-dot,
 .chart-row:focus-visible .chart-lolli-dot {
@@ -274,7 +270,7 @@
   transform: translate(-50%, -50%);
   background: var(--c);
   box-shadow: 0 0 0 3px var(--chart-surface); /* 表面色环：重叠时仍可分辨 */
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .chart-dumbbell-dot--p50 {
   left: var(--x1);
@@ -282,7 +278,7 @@
 }
 .chart-dumbbell-dot--p90 {
   left: var(--x2);
-  background: #1E40AF;
+  background: #3F3F46;
   z-index: 1;
 }
 .chart-row:hover .chart-dumbbell-dot,
@@ -304,7 +300,9 @@
   flex-direction: column;
   justify-content: space-between;
   align-items: flex-end;
-  color: rgba(26, 26, 26, 0.45);
+  color: #71717a;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
   padding: 2px 0;
 }
@@ -336,16 +334,17 @@
   overflow: visible;
 }
 .trend-gridline {
-  stroke: #f5f5f5;
+  stroke: #e4e4e7;
   stroke-width: 1;
+  stroke-dasharray: 3 3;
   vector-effect: non-scaling-stroke;
 }
 .trend-line {
   fill: none;
   stroke: var(--c);
-  stroke-width: 2.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  stroke-width: 1.75;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
   vector-effect: non-scaling-stroke;
 }
 .trend-dot {
@@ -359,7 +358,7 @@
   background: var(--c);
   box-shadow: 0 0 0 3px var(--chart-surface);
   pointer-events: none;
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .trend-col {
   position: absolute;
@@ -381,14 +380,15 @@
 }
 .trend-col:hover .trend-dot,
 .trend-col:focus-visible .trend-dot {
-  filter: brightness(1.08);
-  transform: translate(-50%, -50%) scale(1.2);
+  opacity: 0.8;
 }
 .trend-x {
   grid-column: 2;
   display: flex;
   justify-content: space-between;
-  color: rgba(26, 26, 26, 0.45);
+  color: #71717a;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
 }
 .trend-endlabel {
@@ -412,7 +412,7 @@
 .chart-tip-title {
   font-weight: 600;
   margin-bottom: 2px;
-  color: #1a1a1a;
+  color: inherit;
 }
 .chart-tip-row {
   display: flex;
@@ -429,9 +429,81 @@
 .chart-tip-value {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: #1a1a1a;
+  color: inherit;
 }
 .chart-tip-label {
-  opacity: 0.7;
-  color: rgba(26, 26, 26, 0.7);
+  opacity: 0.75;
+  color: inherit;
 }
+
+.chart-svg {
+  width: 100%;
+  height: 16px;
+  display: block;
+  overflow: visible;
+}
+.chart-svg--group { height: 20px; }
+.chart-svg-base,
+.chart-svg-grid {
+  stroke: #e4e4e7;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.chart-svg-grid { stroke-dasharray: 2 3; }
+.chart-svg-ref {
+  stroke: rgba(24, 24, 27, 0.45);
+  stroke-width: 1;
+}
+.chart-mark {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  overflow: visible;
+}
+.chart-row-value {
+  position: static;
+  width: 112px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.chart-row-meta {
+  position: static;
+  width: 88px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.chart-axis {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.chart-axis-scale {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  padding-right: 0;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: #71717a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.chart-axis--group .chart-axis-scale { padding-right: 0; }
+.chart-axis-value { width: 112px; flex-shrink: 0; }
+.chart-axis-meta { width: 88px; flex-shrink: 0; }
+.chart-axis-vals { width: 44px; flex-shrink: 0; }
+.chart-axis-note { width: 40px; flex-shrink: 0; }
+.chart-row-note {
+  width: 40px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: #71717a;
+}
+.chart-row-plot > .chart-svg { flex: 1; min-width: 0; width: auto; }
+.chart-row-label { width: 108px; }

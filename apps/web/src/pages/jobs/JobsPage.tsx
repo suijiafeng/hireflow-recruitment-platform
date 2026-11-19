@@ -219,7 +219,7 @@ export function JobsPage() {
       render: (_, job) => {
         const used = job.hcUsed ?? 0;
         const pct = Math.min(100, Math.round((used / job.headcount) * 100));
-        const barColor = pct >= 100 ? '#059669' : pct >= 80 ? '#B45309' : '#2563EB';
+        const barColor = pct >= 100 ? '#059669' : pct >= 80 ? '#B45309' : '#18181B';
         return (
           <span className="hf-progress">
             <span className="hf-bar-track">

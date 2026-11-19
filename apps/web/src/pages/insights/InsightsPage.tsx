@@ -1,21 +1,23 @@
 import { ReloadOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { Button, Select, Spin } from 'antd';
-import type { CSSProperties } from 'react';
 import dayjs from 'dayjs';
 import { analyticsApi, departmentsApi } from '../../api';
 import type { InsightsRange } from '../../api/types';
-import { SERIES } from '../../components/charts';
+import {
+  ChartTip,
+  DumbbellChart,
+  GroupedBarChart,
+  LollipopChart,
+  NestedBarChart,
+  ORDINAL,
+  SERIES,
+} from '../../components/charts';
 import { QueryErrorResult } from '../../components/QueryErrorResult';
-import { EmptyBlock } from '../../components/ui';
 import { downloadCsv } from '../../utils/csv';
 import { useUrlState } from '../../hooks/useUrlState';
 import { pressable } from '../../utils/pressable';
 
-const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
-
-/** 渠道漏斗的有序阶梯：投递 → 进面 → Offer → 入职 */
-const CHANNEL_SHADES = ['#93C5FD', '#60A5FA', '#2563EB', '#1E40AF'];
 const CHANNEL_STAGES = ['投递', '进面', 'Offer', '入职'];
 const RANGES: Array<{ key: InsightsRange; label: string }> = [
   { key: '30d', label: '近 30 天' },
@@ -85,15 +87,9 @@ export function InsightsPage() {
   ];
 
   const channels = data?.channels ?? [];
-  const chMax = Math.max(...channels.map((c) => c.applied), 1);
   const interviewers = data?.interviewers ?? [];
   const stageStay = data?.stageStay ?? [];
-  /* p50/p90/medianDays 在无样本时为 null（设计稿按非空写的）。
-     null 不能当 0 画——那会让「暂无样本」读成「0 天」，是在报假数字。
-     取极值时先滤掉 null，渲染时该行改显 —。 */
-  const ssMax = Math.max(...stageStay.map((s) => s.p90Days ?? 0), 1);
   const byJob = data?.tth.byJob ?? [];
-  const tthMax = Math.max(...byJob.map((j) => j.medianDays ?? 0), 1);
 
   /**
    * 导出报表：把四张图各自的明细拼成一份长表（分区 + 指标 + 值）。
@@ -211,203 +207,130 @@ export function InsightsPage() {
           </div>
         ) : (
           <div className="hf-charts">
-            {/* 渠道效能：嵌套条，外浅内深 */}
             <div className="hf-panel">
               <div className="hf-panel-head">
                 <span className="hf-panel-title">渠道效能</span>
-                <span className="hf-legend">
-                  {CHANNEL_STAGES.map((s, i) => (
-                    <span key={s}>
-                      <i style={cssVars({ background: CHANNEL_SHADES[i] })} />
-                      {s}
-                    </span>
-                  ))}
-                </span>
               </div>
               <div className="hf-chart-body">
-                {channels.length === 0 ? (
-                  <EmptyBlock minHeight={160} description="暂无投递数据，录入候选人后自动统计" />
-                ) : (
-                  channels.map((c) => (
-                    <div
-                      className="hf-chart-row"
-                      key={c.source}
-                      title={`${c.source}：${c.applied} → ${c.interviewed} → ${c.offered} → ${c.hired}`}
-                    >
-                      <span className="hf-chart-label w-84">{c.source}</span>
-                      <span className="hf-nest">
-                        {[c.applied, c.interviewed, c.offered, c.hired].map((v, i) => (
-                          <span
-                            key={i}
-                            className="hf-nest-bar"
-                            style={cssVars({
-                              '--w': `${(v / chMax) * 100}%`,
-                              '--c': CHANNEL_SHADES[i],
-                              top: `${i * 3 + 1}px`,
-                              height: `${22 - i * 6}px`,
-                            })}
-                          />
-                        ))}
-                      </span>
-                      <span className="hf-chart-val w-120 hf-faint">
-                        {c.applied} → {c.interviewed} → {c.offered} → {c.hired}
-                      </span>
-                      <span className="hf-chart-val w-80 hf-progress-num">
-                        入职 {c.hireRate != null ? `${c.hireRate}%` : '—'}
-                      </span>
-                    </div>
-                  ))
-                )}
+                <NestedBarChart
+                  data={channels.map((c) => ({
+                    label: c.source,
+                    values: [c.applied, c.interviewed, c.offered, c.hired],
+                    meta: `入职 ${c.hireRate != null ? `${c.hireRate}%` : '—'}`,
+                    tip: (
+                      <ChartTip
+                        title={c.source}
+                        rows={[
+                          { color: ORDINAL[0], value: c.applied, label: '投递' },
+                          { color: ORDINAL[1], value: c.interviewed, label: '进面' },
+                          { color: ORDINAL[2], value: c.offered, label: 'Offer' },
+                          { color: ORDINAL[3], value: c.hired, label: '入职' },
+                        ]}
+                      />
+                    ),
+                  }))}
+                  stages={CHANNEL_STAGES}
+                  colors={ORDINAL}
+                  emptyText="暂无投递数据，录入候选人后自动统计"
+                />
               </div>
             </div>
 
-            {/* 面试官效能：两系列 + 全局基线竖刻度 */}
             <div className="hf-panel">
               <div className="hf-panel-head">
                 <span className="hf-panel-title">面试官效能</span>
-                <span className="hf-legend">
-                  <span>
-                    <i style={cssVars({ background: SERIES.blue, height: 3 })} />
-                    通过率
-                  </span>
-                  <span>
-                    <i style={cssVars({ background: SERIES.aqua, height: 3 })} />
-                    24h 及时率
-                  </span>
-                  {baseline != null && <span>基线 {baseline}%</span>}
-                </span>
               </div>
               <div className="hf-chart-body">
-                {interviewers.length === 0 ? (
-                  <EmptyBlock minHeight={160} description="暂无已提交的面评" />
-                ) : (
-                  interviewers.map((i) => {
+                <GroupedBarChart
+                  data={interviewers.map((i) => {
                     const dev = i.passRate != null && baseline != null ? i.passRate - baseline : null;
-                    return (
-                      <div className="hf-chart-row" key={i.name} title={`${i.name}：${i.evaluations} 份面评`}>
-                        <span className="hf-chart-label w-72">{i.name}</span>
-                        <span className="hf-group-plot">
-                          <span className="hf-gbar" style={cssVars({ '--w': `${i.passRate ?? 0}%`, '--c': SERIES.blue })} />
-                          <span
-                            className="hf-gbar"
-                            style={cssVars({ '--w': `${i.onTimeRate ?? 0}%`, '--c': SERIES.aqua })}
-                          />
-                          {baseline != null && <span className="hf-ref" style={cssVars({ left: `${baseline}%` })} />}
-                        </span>
-                        <span className="hf-chart-val w-84 hf-secondary hf-td--num">
-                          {i.passRate ?? '—'}% / {i.onTimeRate ?? '—'}%
-                        </span>
-                        <span
-                          className={
-                            dev != null && Math.abs(dev) >= 15
-                              ? 'hf-chart-val w-48 hf-state--warn'
-                              : 'hf-chart-val w-48 hf-muted'
-                          }
-                        >
+                    return {
+                      label: i.name,
+                      values: { pass: i.passRate, onTime: i.onTimeRate },
+                      note: (
+                        <span className={dev != null && Math.abs(dev) >= 15 ? 'u-warning-text' : undefined}>
                           {dev == null ? '—' : `${dev > 0 ? '+' : ''}${dev}`}
                         </span>
-                      </div>
-                    );
-                  })
-                )}
+                      ),
+                      tip: (
+                        <ChartTip
+                          title={i.name}
+                          rows={[
+                            { color: SERIES.ink, value: i.passRate ?? '—', label: '通过率 %' },
+                            { color: SERIES.mist, value: i.onTimeRate ?? '—', label: '24h 及时率 %' },
+                            { value: i.evaluations, label: '份面评' },
+                          ]}
+                        />
+                      ),
+                    };
+                  })}
+                  series={[
+                    { key: 'pass', label: '通过率', color: SERIES.ink },
+                    { key: 'onTime', label: '24h 及时率', color: SERIES.mist },
+                  ]}
+                  unit="%"
+                  max={100}
+                  refValue={baseline}
+                  refLabel="基线"
+                  emptyText="暂无已提交的面评"
+                />
               </div>
             </div>
 
-            {/* 阶段停留：P50 → P90 哑铃 */}
             <div className="hf-panel">
               <div className="hf-panel-head">
                 <span className="hf-panel-title">阶段停留时长</span>
-                <span className="hf-legend">
-                  <span>
-                    <i className="dot" style={cssVars({ background: '#60A5FA' })} />
-                    P50 中位
-                  </span>
-                  <span>
-                    <i className="dot" style={cssVars({ background: '#1E40AF' })} />
-                    P90 长尾
-                  </span>
-                </span>
               </div>
               <div className="hf-chart-body">
-                {stageStay.length === 0 ? (
-                  <EmptyBlock minHeight={160} description="暂无阶段流转记录" />
-                ) : (
-                  stageStay.map((s) => {
-                    const has = s.p50Days != null && s.p90Days != null;
-                    return (
-                      <div className="hf-chart-row" key={s.stage} title={`${s.stage}：${s.samples} 样本`}>
-                        <span className="hf-chart-label w-84">{s.stage}</span>
-                        <span className="hf-dumbbell">
-                          <span className="hf-dumbbell-axis" />
-                          {has && (
-                            <>
-                              <span
-                                className="hf-dumbbell-link"
-                                style={cssVars({
-                                  left: `${(s.p50Days! / ssMax) * 100}%`,
-                                  width: `${((s.p90Days! - s.p50Days!) / ssMax) * 100}%`,
-                                })}
-                              />
-                              <span
-                                className="hf-dumbbell-dot"
-                                style={cssVars({ left: `${(s.p50Days! / ssMax) * 100}%`, background: '#60A5FA' })}
-                              />
-                              <span
-                                className="hf-dumbbell-dot"
-                                style={cssVars({ left: `${(s.p90Days! / ssMax) * 100}%`, background: '#1E40AF' })}
-                              />
-                            </>
-                          )}
-                        </span>
-                        <span className="hf-chart-val w-100 hf-progress-num">
-                          {has ? `${s.p50Days} → ${s.p90Days} 天` : '—'}
-                        </span>
-                        <span className="hf-chart-val w-88 hf-faint hf-td--num">{s.samples} 样本</span>
-                      </div>
-                    );
-                  })
-                )}
+                <DumbbellChart
+                  data={stageStay.map((s) => ({
+                    label: s.stage,
+                    low: s.p50Days,
+                    high: s.p90Days,
+                    meta: `${s.samples} 样本`,
+                    tip: (
+                      <ChartTip
+                        title={s.stage}
+                        rows={[
+                          { color: '#A1A1AA', value: s.p50Days ?? '—', label: 'P50 天' },
+                          { color: '#18181B', value: s.p90Days ?? '—', label: 'P90 天' },
+                          { value: s.samples, label: '样本' },
+                        ]}
+                      />
+                    ),
+                  }))}
+                  unit=" 天"
+                  rangeLabels={['P50 中位', 'P90 长尾']}
+                  emptyText="暂无阶段流转记录"
+                />
               </div>
             </div>
 
-            {/* TTH 按职位：棒棒糖 */}
             <div className="hf-panel">
               <div className="hf-panel-head">
                 <span className="hf-panel-title">TTH 按职位</span>
-                <span className="hf-panel-note">投递创建 → 入职闭环的中位天数</span>
+                <span className="hf-panel-note">投递创建到入职闭环的中位天数。满 40 天标为偏慢。</span>
               </div>
               <div className="hf-chart-body">
-                {byJob.length === 0 ? (
-                  <EmptyBlock minHeight={160} description="暂无入职闭环样本" />
-                ) : (
-                  byJob.map((j) => (
-                    <div className="hf-chart-row" key={j.jobTitle} title={`${j.jobTitle}：${j.hired} 人样本`}>
-                      <span className="hf-chart-label w-148 hf-ellipsis">{j.jobTitle}</span>
-                      <span className="hf-lolli">
-                        <span className="hf-dumbbell-axis" />
-                        {j.medianDays != null && (
-                          <>
-                            <span
-                              className="hf-lolli-stem"
-                              style={cssVars({ '--w': `${(j.medianDays / tthMax) * 100}%` })}
-                            />
-                            <span
-                              className="hf-dumbbell-dot"
-                              style={cssVars({
-                                left: `${(j.medianDays / tthMax) * 100}%`,
-                                background: j.medianDays >= 40 ? '#B45309' : '#2563EB',
-                              })}
-                            />
-                          </>
-                        )}
-                      </span>
-                      <span className="hf-chart-val w-64 hf-progress-num">
-                        {j.medianDays != null ? `${j.medianDays} 天` : '—'}
-                      </span>
-                      <span className="hf-chart-val w-80 hf-faint hf-td--num">{j.hired} 人样本</span>
-                    </div>
-                  ))
-                )}
+                <LollipopChart
+                  data={byJob.map((j) => ({
+                    label: j.jobTitle,
+                    value: j.medianDays,
+                    meta: `${j.hired} 人样本`,
+                    color: j.medianDays != null && j.medianDays >= 40 ? '#B45309' : SERIES.ink,
+                    tip: (
+                      <ChartTip
+                        title={j.jobTitle}
+                        rows={[
+                          { value: j.medianDays ?? '—', label: '中位天' },
+                          { value: j.hired, label: '人样本' },
+                        ]}
+                      />
+                    ),
+                  }))}
+                  unit=" 天"
+                  emptyText="暂无入职闭环样本"
+                />
               </div>
             </div>
           </div>

@@ -152,18 +152,18 @@ async function seedDemoData(techDeptId: string, productDeptId: string) {
     jobStages.find((s) => s.name === name)!;
 
   const backendCandidates: DemoCandidate[] = [
-    { name: '张伟', email: 'zhangwei@example.com', phone: '13800000001', source: 'BOSS直聘', tags: ['React', 'TypeScript', 'Node.js'], matchScore: 92, stage: '二面' },
-    { name: '李娜', email: 'lina@example.com', phone: '13800000002', source: '猎聘', tags: ['NestJS', 'PostgreSQL', '微服务'], matchScore: 88, stage: '一面' },
-    { name: '王强', email: 'wangqiang@example.com', phone: '13800000003', source: '内推', tags: ['Java', 'Spring', '高并发'], matchScore: 85, stage: '一面' },
-    { name: '赵敏', email: 'zhaomin@example.com', phone: '13800000004', source: '拉勾', tags: ['Go', 'Kubernetes', '微服务'], matchScore: 81, stage: '简历初筛' },
-    { name: '刘洋', email: 'liuyang@example.com', phone: '13800000005', source: 'BOSS直聘', tags: ['Python', '数据工程'], matchScore: 74, stage: '简历初筛' },
-    { name: '陈静', email: 'chenjing@example.com', phone: '13800000006', source: '官网投递', tags: ['Node.js', 'React', '全栈'], matchScore: 79, stage: '简历初筛' },
-    { name: '杨帆', email: 'yangfan@example.com', phone: '13800000007', source: '猎头推荐', tags: ['Java', '分布式', '带团队'], matchScore: 90, stage: 'Offer' },
-    { name: '周杰', email: 'zhoujie@example.com', phone: '13800000008', source: '人才库唤醒', tags: ['Vue', '小程序'], matchScore: 68, stage: '待入职' },
+    { name: '沈知夏', email: 'shen.zhixia@163.com', phone: '13817642058', source: 'BOSS直聘', tags: ['React', 'TypeScript', 'Node.js'], matchScore: 92, stage: '二面' },
+    { name: '顾清和', email: 'guqinghe@qq.com', phone: '13918472630', source: '猎聘', tags: ['NestJS', 'PostgreSQL', '微服务'], matchScore: 88, stage: '一面' },
+    { name: '陆景行', email: 'lu.jingxing@outlook.com', phone: '13601745892', source: '内推', tags: ['Java', 'Spring', '高并发'], matchScore: 85, stage: '一面' },
+    { name: '江晚晴', email: 'jiangwanqing@126.com', phone: '15821936470', source: '拉勾', tags: ['Go', 'Kubernetes', '微服务'], matchScore: 81, stage: '简历初筛' },
+    { name: '裴予安', email: 'pei.yuan@foxmail.com', phone: '18621570483', source: 'BOSS直聘', tags: ['Python', '数据工程'], matchScore: 74, stage: '简历初筛' },
+    { name: '唐小满', email: 'tangxiaoman@163.com', phone: '13764289015', source: '官网投递', tags: ['Node.js', 'React', '全栈'], matchScore: 79, stage: '简历初筛' },
+    { name: '韩叙', email: 'hanxu@outlook.com', phone: '15000831746', source: '猎头推荐', tags: ['Java', '分布式', '带团队'], matchScore: 90, stage: 'Offer' },
+    { name: '程一楠', email: 'cheng.yinan@qq.com', phone: '18817562094', source: '人才库唤醒', tags: ['Vue', '小程序'], matchScore: 68, stage: '待入职' },
   ];
   const productCandidates: DemoCandidate[] = [
-    { name: '吴悠', email: 'wuyou@example.com', phone: '13800000011', source: 'BOSS直聘', tags: ['B端产品', '数据分析'], matchScore: 86, stage: '一面' },
-    { name: '郑好', email: 'zhenghao@example.com', phone: '13800000012', source: '猎聘', tags: ['产品设计', '用户研究'], matchScore: 77, stage: '简历初筛' },
+    { name: '宋以安', email: 'song.yian@163.com', phone: '13916284750', source: 'BOSS直聘', tags: ['B端产品', '数据分析'], matchScore: 86, stage: '一面' },
+    { name: '梁知微', email: 'liang.zhiwei@qq.com', phone: '18602175934', source: '猎聘', tags: ['产品设计', '用户研究'], matchScore: 77, stage: '简历初筛' },
   ];
 
   const seedApplications = async (job: typeof backendJob, candidates: DemoCandidate[]) => {
@@ -182,9 +182,9 @@ async function seedDemoData(techDeptId: string, productDeptId: string) {
               parseStatus: 'DONE',
               skills: c.tags,
               parsed: {
-                summary: `${c.tags.join('/')} 方向候选人，示例解析结果`,
-                educations: [{ school: '示例大学', degree: '本科' }],
-                experiences: [{ company: '示例科技', title: '工程师', years: 3 }],
+                summary: `${c.tags.join(' / ')} 方向，近 4 年在业务团队写过线上服务`,
+                educations: [{ school: '浙江大学', degree: '本科' }],
+                experiences: [{ company: '美团', title: '工程师', years: 3 }],
               },
             },
           },
@@ -216,16 +216,16 @@ async function seedDemoData(techDeptId: string, productDeptId: string) {
   await seedApplications(backendJob, backendCandidates);
   await seedApplications(productJob, productCandidates);
 
-  // 李娜：明天 14:00 一面；张伟：补一场已完成的一面与面评
+  // 顾清和：明天 14:32:18 一面；沈知夏：补一场已完成的一面与面评
   const interviewer = await prisma.user.findUniqueOrThrow({
     where: { email: 'interviewer@arthr.local' },
   });
   const lina = await prisma.application.findFirstOrThrow({
-    where: { job: { id: backendJob.id }, candidate: { name: '李娜' } },
+    where: { job: { id: backendJob.id }, candidate: { name: '顾清和' } },
   });
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setHours(14, 0, 0, 0);
+  tomorrow.setHours(14, 32, 18, 0);
   await prisma.interview.create({
     data: {
       applicationId: lina.id,
@@ -237,7 +237,7 @@ async function seedDemoData(techDeptId: string, productDeptId: string) {
   });
 
   const zhangwei = await prisma.application.findFirstOrThrow({
-    where: { job: { id: backendJob.id }, candidate: { name: '张伟' } },
+    where: { job: { id: backendJob.id }, candidate: { name: '沈知夏' } },
   });
   const doneInterview = await prisma.interview.create({
     data: {
@@ -270,7 +270,7 @@ async function seedDemoData(techDeptId: string, productDeptId: string) {
       action: ACTIVITY_ACTIONS.EVALUATION_SUBMITTED,
       entityType: 'Application',
       entityId: zhangwei.id,
-      payload: { candidate: '张伟', round: 1, conclusion: 'YES' },
+      payload: { candidate: '沈知夏', round: 1, conclusion: 'YES' },
     },
   });
 

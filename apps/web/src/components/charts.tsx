@@ -3,27 +3,24 @@ import type { CSSProperties, ReactNode } from 'react';
 import { EmptyBlock } from './ui';
 
 /**
- * 图表组件库（dataviz 规范实现，样式见 styles/charts.css）：
- * - 颜色全部来自 validate_palette.js 校验通过的色板（禁止目测新增）
- * - 悬停层默认内建：条/点悬停提示，折线为列命中区 + 十字准线
- * - 空数据 → EmptyBlock 占位；条目过多 → 固定高度内滚 + 总数说明
+ * 图表：SVG + 水平虚线网格 / 底轴刻度，不用 div 色条冒充。
+ * 系列色只有一档墨色阶梯（深浅区分系列，不另开色相）。
+ * 悬停走 Tooltip；空数据走 EmptyBlock。
  */
 
-/** 分类系列色（categorical slot 1/2，现代蓝紫品牌色系） */
-export const SERIES = { blue: '#2563EB', aqua: '#06B6D4' } as const;
-/** 有序四级阶梯（浅→深，现代蓝紫渐变）：投递 → 进面 → Offer → 入职 */
-export const ORDINAL_BLUE_4 = ['#93C5FD', '#60A5FA', '#2563EB', '#1E40AF'] as const;
+/** 分类两系列：墨色 + 同族浅灰，避免蓝青撞色 */
+export const SERIES = { ink: '#18181B', mist: '#A1A1AA' } as const;
+/** 有序四级阶梯（浅→深）：投递 → 进面 → Offer → 入职 */
+export const ORDINAL = ['#D4D4D8', '#A1A1AA', '#52525B', '#18181B'] as const;
 /** 哑铃两档（同色系两级） */
-export const DUMBBELL = { p50: '#60A5FA', p90: '#1E40AF' } as const;
+export const DUMBBELL = { p50: '#A1A1AA', p90: '#18181B' } as const;
 /** 基线刻度用墨色（参考标记不占用系列色） */
-const REF_INK = 'rgba(15, 23, 42, 0.45)';
+const REF_INK = 'rgba(24, 24, 27, 0.45)';
 
-/** 数据驱动的值仅以 CSS 变量传入（静态样式一律走 class） */
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
 const TIP_TRIGGER: Array<'hover' | 'focus'> = ['hover', 'focus'];
 
-/** Tooltip 内容：数值为主、系列名为辅，短色条作系列键 */
 export function ChartTip({
   title,
   rows,
@@ -61,63 +58,143 @@ function Legend({ items, mark }: { items: Array<{ label: string; color: string }
 
 function RowsWrap({ count, maxVisible, children }: { count: number; maxVisible: number; children: ReactNode }) {
   const scroll = count > maxVisible;
+  return <div className={scroll ? 'chart-rows chart-rows--scroll' : 'chart-rows'}>{children}</div>;
+}
+
+function ScrollCaption({ count, maxVisible }: { count: number; maxVisible: number }) {
+  if (count <= maxVisible) return null;
+  return <div className="chart-caption">共 {count} 项 · 滚动查看全部</div>;
+}
+
+/** 底轴：0 / 中点 / 上限，12px 等宽浅灰。刻度跟绘图区对齐，不跟左侧类目对齐。 */
+function Axis({ max, unit = '', variant = 'pad' }: { max: number; unit?: string; variant?: 'pad' | 'group' }) {
+  const fmt = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
   return (
-    <>
-      <div className={scroll ? 'chart-rows chart-rows--scroll' : 'chart-rows'}>{children}</div>
-      {scroll && <div className="chart-caption">共 {count} 项 · 滚动查看全部</div>}
-    </>
+    <div className={variant === 'group' ? 'chart-axis chart-axis--group' : 'chart-axis'} aria-hidden="true">
+      <span className="chart-row-label" />
+      <span className="chart-axis-scale">
+        <span>0{unit}</span>
+        <span>
+          {fmt(max / 2)}
+          {unit}
+        </span>
+        <span>
+          {fmt(max)}
+          {unit}
+        </span>
+      </span>
+      {variant === 'group' ? (
+        <>
+          <span className="chart-axis-vals" />
+          <span className="chart-axis-note" />
+        </>
+      ) : (
+        <>
+          <span className="chart-axis-value" />
+          <span className="chart-axis-meta" />
+        </>
+      )}
+    </div>
   );
 }
 
-/** 棒棒糖图（名义类目比较：针杆 + 端点圆点，零值/小数值依然可见） */
+/** 水平条：拉伸只作用于矩形，描边用 non-scaling-stroke，避免圆点被拉成椭圆 */
+function HBars({
+  layers,
+}: {
+  layers: Array<{ widthPct: number; color: string; y: number; h: number }>;
+}) {
+  return (
+    <svg className="chart-svg" viewBox="0 0 100 16" preserveAspectRatio="none" aria-hidden="true">
+      <line className="chart-svg-base" x1="0" x2="100" y1="15.5" y2="15.5" />
+      {[25, 50, 75].map((x) => (
+        <line key={x} className="chart-svg-grid" x1={x} x2={x} y1="0" y2="16" />
+      ))}
+      {layers.map((layer, i) => (
+        <rect
+          key={i}
+          x="0"
+          y={layer.y}
+          width={Math.max(0, Math.min(100, layer.widthPct))}
+          height={layer.h}
+          fill={layer.color}
+        />
+      ))}
+    </svg>
+  );
+}
+
+/** 棒棒糖图（名义类目比较：针杆 + 端点，零值仍可见） */
 export function LollipopChart({
   data,
   unit = '',
-  color = SERIES.blue,
+  color = SERIES.ink,
   maxVisible = 8,
   emptyText = '暂无数据',
 }: {
-  data: Array<{ label: string; value: number | null; meta?: string; tip?: ReactNode }>;
+  data: Array<{ label: string; value: number | null; meta?: string; tip?: ReactNode; color?: string }>;
   unit?: string;
   color?: string;
   maxVisible?: number;
   emptyText?: string;
 }) {
-  const rows = data.filter((d) => d.value != null);
-  if (rows.length === 0) return <EmptyBlock minHeight={200} description={emptyText} />;
-  const max = Math.max(...rows.map((r) => r.value ?? 0), 1) * 1.08;
+  if (data.length === 0) return <EmptyBlock minHeight={200} description={emptyText} />;
+  const numeric = data.map((d) => d.value).filter((v): v is number => v != null);
+  const max = Math.max(...numeric, 1) * 1.08;
   return (
     <div className="chart">
-      <RowsWrap count={rows.length} maxVisible={maxVisible}>
-        {rows.map((r) => (
-          <Tooltip key={r.label} title={r.tip} trigger={TIP_TRIGGER}>
-            <div className="chart-row" tabIndex={0}>
-              <span className="chart-row-label">{r.label}</span>
-              <div className="chart-row-plot">
-                <div className="chart-lolli" style={cssVars({ '--x': `${((r.value ?? 0) / max) * 100}%`, '--c': color })}>
-                  <span className="chart-lolli-track" />
-                  <span className="chart-lolli-stem" />
-                  <span className="chart-lolli-dot" />
+      <RowsWrap count={data.length} maxVisible={maxVisible}>
+        {data.map((r) => {
+          const pct = r.value == null ? 0 : (r.value / max) * 100;
+          const mark = r.color ?? color;
+          return (
+            <Tooltip key={r.label} title={r.tip} trigger={TIP_TRIGGER}>
+              <div className="chart-row" tabIndex={0}>
+                <span className="chart-row-label">{r.label}</span>
+                <div className="chart-row-plot">
+                  <div className="chart-lolli">
+                    <svg className="chart-svg" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">
+                      <line className="chart-svg-base" x1="0" x2="100" y1="10" y2="10" />
+                      {r.value != null && (
+                        <line
+                          x1="0"
+                          x2={pct}
+                          y1="10"
+                          y2="10"
+                          stroke={mark}
+                          strokeWidth="1.75"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                    </svg>
+                    {r.value != null && (
+                      <svg className="chart-mark" style={cssVars({ left: `${pct}%` })} viewBox="0 0 12 12" aria-hidden="true">
+                        <circle cx="6" cy="6" r="4" fill={mark} />
+                      </svg>
+                    )}
+                  </div>
                 </div>
                 <span className="chart-row-value">
-                  {r.value}
-                  {unit}
+                  {r.value ?? '—'}
+                  {r.value != null ? unit : ''}
                 </span>
-                {r.meta && <span className="chart-row-meta">{r.meta}</span>}
+                <span className="chart-row-meta">{r.meta ?? ''}</span>
               </div>
-            </div>
-          </Tooltip>
-        ))}
+            </Tooltip>
+          );
+        })}
       </RowsWrap>
+      <Axis max={max} unit={unit} />
+      <ScrollCaption count={data.length} maxVisible={maxVisible} />
     </div>
   );
 }
 
-/** 嵌套条形图（有序阶段子集：外层最浅、逐层收窄加深，2px 表面环分隔） */
+/** 嵌套条形图（有序阶段子集：外层最浅、逐层收窄加深） */
 export function NestedBarChart({
   data,
   stages,
-  colors = ORDINAL_BLUE_4,
+  colors = ORDINAL,
   maxVisible = 6,
   emptyText = '暂无数据',
 }: {
@@ -138,27 +215,28 @@ export function NestedBarChart({
             <div className="chart-row" tabIndex={0}>
               <span className="chart-row-label">{d.label}</span>
               <div className="chart-row-plot">
-                <div className="chart-nest">
-                  {d.values.map((v, i) => (
-                    <div
-                      key={i}
-                      className="chart-nest-bar"
-                      style={cssVars({ '--w': `${(v / max) * 100}%`, '--c': colors[i] })}
-                    />
-                  ))}
-                </div>
-                <span className="chart-row-value">{d.values[0]}</span>
-                {d.meta && <span className="chart-row-meta">{d.meta}</span>}
+                <HBars
+                  layers={d.values.map((v, i) => ({
+                    widthPct: (v / max) * 100,
+                    color: colors[i],
+                    y: 2 + i * 1.5,
+                    h: Math.max(4, 12 - i * 2.5),
+                  }))}
+                />
               </div>
+              <span className="chart-row-value">{d.values[0]}</span>
+              <span className="chart-row-meta">{d.meta ?? ''}</span>
             </div>
           </Tooltip>
         ))}
       </RowsWrap>
+      <Axis max={max} />
+      <ScrollCaption count={data.length} maxVisible={maxVisible} />
     </div>
   );
 }
 
-/** 分组条形图（每行多系列同轴对比 + 可选基线刻度，如通过率/及时率 vs 全局基线） */
+/** 分组条形图（每行多系列同轴对比 + 可选基线刻度） */
 export function GroupedBarChart({
   data,
   series,
@@ -169,12 +247,10 @@ export function GroupedBarChart({
   maxVisible = 5,
   emptyText = '暂无数据',
 }: {
-  data: Array<{ label: string; values: Record<string, number | null>; tip?: ReactNode }>;
+  data: Array<{ label: string; values: Record<string, number | null>; tip?: ReactNode; note?: ReactNode }>;
   series: Array<{ key: string; label: string; color: string }>;
   unit?: string;
-  /** 固定坐标上限（比率类图传 100），缺省按数据自适应 */
   max?: number;
-  /** 基线刻度（如全局均值），墨色竖刻度贯穿每行 */
   refValue?: number | null;
   refLabel?: string;
   maxVisible?: number;
@@ -184,7 +260,7 @@ export function GroupedBarChart({
   const max =
     fixedMax ??
     Math.max(...data.flatMap((d) => series.map((s) => d.values[s.key] ?? 0)), refValue ?? 0, 1);
-  const X = (v: number | null) => `${(Math.max(v ?? 0, 0) / max) * 100}%`;
+  const X = (v: number | null) => (Math.max(v ?? 0, 0) / max) * 100;
   return (
     <div className="chart">
       <Legend
@@ -200,32 +276,50 @@ export function GroupedBarChart({
             <div className="chart-row chart-row--group" tabIndex={0}>
               <span className="chart-row-label">{d.label}</span>
               <div className="chart-group-track">
-                {series.map((s) => (
-                  <div
-                    key={s.key}
-                    className="chart-gbar"
-                    style={cssVars({ '--w': X(d.values[s.key]), '--c': s.color })}
-                  />
-                ))}
-                {refValue != null && <span className="chart-ref-tick" style={cssVars({ '--x': X(refValue) })} />}
+                <svg className="chart-svg chart-svg--group" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">
+                  <line className="chart-svg-base" x1="0" x2="100" y1="19.5" y2="19.5" />
+                  {series.map((s, i) => (
+                    <rect
+                      key={s.key}
+                      x="0"
+                      y={2 + i * 9}
+                      width={X(d.values[s.key])}
+                      height="7"
+                      fill={s.color}
+                    />
+                  ))}
+                  {refValue != null && (
+                    <line
+                      className="chart-svg-ref"
+                      x1={X(refValue)}
+                      x2={X(refValue)}
+                      y1="0"
+                      y2="20"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )}
+                </svg>
               </div>
               <div className="chart-group-vals">
                 {series.map((s) => (
                   <span key={s.key}>
-                    {d.values[s.key] ?? '-'}
+                    {d.values[s.key] ?? '—'}
                     {d.values[s.key] != null ? unit : ''}
                   </span>
                 ))}
               </div>
+              {d.note != null && <span className="chart-row-note">{d.note}</span>}
             </div>
           </Tooltip>
         ))}
       </RowsWrap>
+      <Axis max={max} unit={unit} variant="group" />
+      <ScrollCaption count={data.length} maxVisible={maxVisible} />
     </div>
   );
 }
 
-/** 哑铃图（每项的区间两档：P50 浅点 → P90 深点，同色系两级） */
+/** 哑铃图（每项的区间两档：P50 浅点 → P90 深点） */
 export function DumbbellChart({
   data,
   unit = '',
@@ -233,15 +327,15 @@ export function DumbbellChart({
   maxVisible = 6,
   emptyText = '暂无数据',
 }: {
-  data: Array<{ label: string; low: number | null; high: number | null; tip?: ReactNode }>;
+  data: Array<{ label: string; low: number | null; high: number | null; tip?: ReactNode; meta?: string }>;
   unit?: string;
   rangeLabels?: [string, string];
   maxVisible?: number;
   emptyText?: string;
 }) {
-  const rows = data.filter((d) => d.low != null && d.high != null);
-  if (rows.length === 0) return <EmptyBlock minHeight={200} description={emptyText} />;
-  const max = Math.max(...rows.map((r) => r.high ?? 0), 1) * 1.08;
+  if (data.length === 0) return <EmptyBlock minHeight={200} description={emptyText} />;
+  const highs = data.map((d) => d.high).filter((v): v is number => v != null);
+  const max = Math.max(...highs, 1) * 1.08;
   return (
     <div className="chart">
       <Legend
@@ -251,31 +345,52 @@ export function DumbbellChart({
         ]}
         mark="dot"
       />
-      <RowsWrap count={rows.length} maxVisible={maxVisible}>
-        {rows.map((r) => {
-          const x1 = `${((r.low ?? 0) / max) * 100}%`;
-          const x2 = `${((r.high ?? 0) / max) * 100}%`;
+      <RowsWrap count={data.length} maxVisible={maxVisible}>
+        {data.map((r) => {
+          const has = r.low != null && r.high != null;
+          const x1 = ((r.low ?? 0) / max) * 100;
+          const x2 = ((r.high ?? 0) / max) * 100;
           return (
             <Tooltip key={r.label} title={r.tip} trigger={TIP_TRIGGER}>
               <div className="chart-row" tabIndex={0}>
                 <span className="chart-row-label">{r.label}</span>
                 <div className="chart-row-plot">
-                  <div className="chart-dumbbell" style={cssVars({ '--x1': x1, '--x2': x2 })}>
-                    <span className="chart-dumbbell-track" />
-                    <span className="chart-dumbbell-link" />
-                    <span className="chart-dumbbell-dot chart-dumbbell-dot--p50" />
-                    <span className="chart-dumbbell-dot chart-dumbbell-dot--p90" />
+                  <div className="chart-lolli">
+                    <svg className="chart-svg" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">
+                      <line className="chart-svg-base" x1="0" x2="100" y1="10" y2="10" />
+                      {has && (
+                        <line
+                          x1={x1}
+                          x2={x2}
+                          y1="10"
+                          y2="10"
+                          stroke="#D4D4D8"
+                          strokeWidth="2"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                    </svg>
+                    {has && (
+                      <>
+                        <svg className="chart-mark" style={cssVars({ left: `${x1}%` })} viewBox="0 0 12 12" aria-hidden="true">
+                          <circle cx="6" cy="6" r="3.5" fill={DUMBBELL.p50} />
+                        </svg>
+                        <svg className="chart-mark" style={cssVars({ left: `${x2}%` })} viewBox="0 0 12 12" aria-hidden="true">
+                          <circle cx="6" cy="6" r="4" fill={DUMBBELL.p90} />
+                        </svg>
+                      </>
+                    )}
                   </div>
-                  <span className="chart-row-value">
-                    {r.low} / {r.high}
-                    {unit}
-                  </span>
                 </div>
+                <span className="chart-row-value">{has ? `${r.low} / ${r.high}${unit}` : '—'}</span>
+                <span className="chart-row-meta">{r.meta ?? ''}</span>
               </div>
             </Tooltip>
           );
         })}
       </RowsWrap>
+      <Axis max={max} unit={unit} />
+      <ScrollCaption count={data.length} maxVisible={maxVisible} />
     </div>
   );
 }
@@ -289,7 +404,7 @@ const niceCeil = (v: number) => {
 
 const trimNum = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
 
-/** 趋势折线图（多系列同轴）：列命中区 + 十字准线 + 单 Tooltip 列出全部系列 */
+/** 趋势折线图：只留水平虚线网格，折线 1.75px，无面积填充 */
 export function TrendChart({
   data,
   series,
@@ -305,7 +420,6 @@ export function TrendChart({
   const X = (i: number) => (data.length === 1 ? 50 : (i / (data.length - 1)) * 100);
   const Y = (v: number) => 100 - (v / max) * 100;
   const last = data[data.length - 1];
-  // 端点直标（相对色弱系列的补偿通道）；两系列终点太近会互相叠字 → 退回图例+Tooltip
   const endYs = series.map((s) => Y(last.values[s.key] ?? 0));
   const endLabelsCollide = endYs.length > 1 && Math.abs(endYs[0] - endYs[1]) < 12;
   const colWidth = 100 / data.length;

@@ -20,10 +20,10 @@ const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
 const PAGE_SIZE = 20;
 
-/** 匹配分色带：≥85 正向 / ≥70 主色 / 其余预警。与看板卡片、漏斗同一套规则 */
+/** 匹配分：≥85 正向绿，≥70 中性墨，其余偏弱用琥珀。不拿品牌色给每一行上色。 */
 function scoreColor(score: number) {
   if (score >= 85) return '#059669';
-  if (score >= 70) return '#2563EB';
+  if (score >= 70) return '#52525B';
   return '#B45309';
 }
 
