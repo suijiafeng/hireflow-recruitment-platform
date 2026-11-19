@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { aiApi, departmentsApi, jobsApi, usersApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import type { Job } from '../../api/types';
+import { QueryErrorResult } from '../../components/QueryErrorResult';
 import { RowActions } from '../../components/RowActions';
 import { ScorecardModal } from './ScorecardModal';
 import { JobStagesModal } from './JobStagesModal';
@@ -347,6 +348,14 @@ export function JobsPage() {
       </div>
 
       <div className="hf-body">
+        {jobsQuery.isError ? (
+          <QueryErrorResult error={jobsQuery.error} onRetry={() => void jobsQuery.refetch()} />
+        ) : jobsQuery.isPending ? (
+          <div className="hf-state-block">
+            <Spin />
+          </div>
+        ) : (
+        <>
         <div className="hf-kpis">
           {kpis.map((k) => (
             <div className="hf-kpi" key={k.label}>
@@ -359,11 +368,7 @@ export function JobsPage() {
           ))}
         </div>
 
-        {jobsQuery.isLoading ? (
-          <div className="hf-state-block">
-            <Spin />
-          </div>
-        ) : items.length === 0 ? (
+        {items.length === 0 ? (
           <div className="hf-state-block">
             <div className="hf-state-icon">
               <AppstoreOutlined />
@@ -404,6 +409,8 @@ export function JobsPage() {
               }}
             />
           </div>
+        )}
+        </>
         )}
       </div>
 

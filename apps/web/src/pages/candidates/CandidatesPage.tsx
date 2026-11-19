@@ -10,6 +10,7 @@ import { candidatesApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import type { Candidate } from '../../api/types';
 import { CandidateDetailDrawer } from '../../components/CandidateDetailDrawer';
+import { QueryErrorResult } from '../../components/QueryErrorResult';
 import { RowActions } from '../../components/RowActions';
 import { useAuthStore } from '../../stores/auth';
 import { FormModal } from '../../components/FormModal';
@@ -255,9 +256,11 @@ export function CandidatesPage() {
               仅看待初筛
             </Tag>
           )}
-          <span className="hf-muted">
-            共 <b className="hf-td--num">{total}</b> 人
-          </span>
+          {candidatesQuery.isSuccess && (
+            <span className="hf-muted">
+              共 <b className="hf-td--num">{total}</b> 人
+            </span>
+          )}
         </div>
         <div className="hf-bar-right">
           {hasPermission(PERMISSIONS.CANDIDATE_CREATE) && (
@@ -269,7 +272,9 @@ export function CandidatesPage() {
       </div>
 
       <div className="hf-body">
-        {candidatesQuery.isLoading ? (
+        {candidatesQuery.isError ? (
+          <QueryErrorResult error={candidatesQuery.error} onRetry={() => void candidatesQuery.refetch()} />
+        ) : candidatesQuery.isPending ? (
           <div className="hf-state-block">
             <Spin />
           </div>
