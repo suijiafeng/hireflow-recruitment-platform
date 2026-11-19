@@ -4008,6 +4008,12 @@
   border-color: #2563EB;
   color: #fff;
 }
+/* 全站选区把前景设成品牌蓝；蓝底气泡上会和背景融成一块，这里改回白字加深底 */
+.hf-bubble--user::selection,
+.hf-bubble--user *::selection {
+  background: #1e3a8a;
+  color: #fff;
+}
 .hf-bubble--typing { display: inline-flex; align-items: center; gap: 8px; color: rgba(26, 26, 26, 0.55); }
 .hf-bubble--error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
 
