@@ -1,5 +1,24 @@
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { resolveApiProxyTarget } from './devApiTarget';
+
+const webRoot = dirname(fileURLToPath(import.meta.url));
+
+function readApiEnv(): string | null {
+  try {
+    return readFileSync(resolve(webRoot, '../api/.env'), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+const apiProxyTarget = resolveApiProxyTarget({
+  envPort: process.env.PORT,
+  apiEnvText: readApiEnv(),
+});
 
 export default defineConfig({
   plugins: [react()],
@@ -34,7 +53,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
     },

@@ -26,6 +26,7 @@ import type {
   InterviewPortalView,
   JdDraft,
   Job,
+  JobListSummary,
   JobStage,
   JobStageInput,
   Offer,
@@ -59,8 +60,13 @@ export const jobsApi = {
     http.get<JobStage[]>(`/jobs/${id}/stages`, { signal }).then((r) => r.data),
   updateStages: (id: string, stages: JobStageInput[]) =>
     http.put<JobStage[]>(`/jobs/${id}/stages`, { stages }).then((r) => r.data),
-  list: (params: { page?: number; pageSize?: number; keyword?: string; status?: string }) =>
-    http.get<Paginated<Job>>('/jobs', { params }).then((r) => r.data),
+  list: (params: {
+    page?: number;
+    pageSize?: number;
+    keyword?: string;
+    status?: string;
+    departmentId?: string;
+  }) => http.get<Paginated<Job> & { summary: JobListSummary }>('/jobs', { params }).then((r) => r.data),
   create: (data: {
     title: string;
     departmentId: string;
