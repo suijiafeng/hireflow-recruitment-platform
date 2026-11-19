@@ -27,7 +27,10 @@ export class JobsService {
   ) {}
 
   async list(query: QueryJobsDto, user?: JwtUser) {
-    const { page = 1, pageSize = 20, keyword, status, departmentId } = query;
+    const { page = 1, pageSize = 20, keyword, status } = query;
+    // 空字符串不是「不筛选」：?? 不会把它当成缺省，后面的真值判断又会整段丢掉部门条件，
+    // 本部门账号就能用 ?departmentId= 看到全部职位。空白一律视为未传。
+    const departmentId = query.departmentId?.trim() || undefined;
     // 数据行级权限：用人经理仅本部门职位
     const deptScope = user ? departmentScopeOf(user) : null;
     const empty = {

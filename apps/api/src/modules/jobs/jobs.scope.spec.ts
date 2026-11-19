@@ -219,6 +219,13 @@ describe('职位与应聘数据范围及对比参数回归', () => {
     expect(outside.items).toEqual([]);
     expect(outside.summary.headcount).toBe(0);
 
+    // 空部门参数必须回落到本人范围，不能因为空字符串丢掉部门条件
+    for (const blank of ['', '   ']) {
+      const leaked = await get(`/jobs?departmentId=${encodeURIComponent(blank)}`);
+      expect(leaked.total).toBe(page.total);
+      expect(leaked.summary).toEqual(page.summary);
+    }
+
     const created = await request('/jobs', {
       title: '汇总回归职位',
       departmentId: 'dept-child',
