@@ -68,8 +68,15 @@ export function JobsPage() {
   const [form] = Form.useForm();
 
   const jobsQuery = useQuery({
-    queryKey: ['jobs', page, keyword],
-    queryFn: () => jobsApi.list({ page, pageSize: PAGE_SIZE, keyword: keyword || undefined }),
+    queryKey: ['jobs', page, keyword, status, deptId ?? ''],
+    queryFn: () =>
+      jobsApi.list({
+        page,
+        pageSize: PAGE_SIZE,
+        keyword: keyword || undefined,
+        status: status || undefined,
+        departmentId: deptId,
+      }),
   });
   const departmentsQuery = useQuery({ queryKey: ['departments'], queryFn: departmentsApi.list });
   const managersQuery = useQuery({
@@ -166,14 +173,10 @@ export function JobsPage() {
     });
   };
 
-  const all = jobsQuery.data?.items ?? [];
-  /** 状态与部门筛选在前端做（列表接口只支持 keyword），不额外增加请求 */
-  const items = all.filter((j) => (!status || j.status === status) && (!deptId || j.department.id === deptId));
+  const items = jobsQuery.data?.items ?? [];
   const total = jobsQuery.data?.total ?? 0;
-
-  /** KPI 带：全部取自当前列表，不新增请求 */
-  const hcTotal = all.reduce((s, j) => s + j.headcount, 0);
-  const hcUsed = all.reduce((s, j) => s + ((j as Job & { hcUsed?: number }).hcUsed ?? 0), 0);
+  // 顶部数字是范围内全部职位的口径（与大盘「在招职位」一致），不能拿当前页的 20 条来加总
+  const summary = jobsQuery.data?.summary;
 
   const jobColumns: TableProps<Job>['columns'] = [
     {
@@ -214,7 +217,7 @@ export function JobsPage() {
       key: 'hc',
       width: 170,
       render: (_, job) => {
-        const used = (job as Job & { hcUsed?: number }).hcUsed ?? 0;
+        const used = job.hcUsed ?? 0;
         const pct = Math.min(100, Math.round((used / job.headcount) * 100));
         const barColor = pct >= 100 ? '#059669' : pct >= 80 ? '#B45309' : '#2563EB';
         return (
@@ -292,15 +295,11 @@ export function JobsPage() {
     },
   ];
   const kpis = [
-    { label: '招聘中', value: all.filter((j) => j.status === 'OPEN').length, unit: '个' },
-    { label: '待审批', value: all.filter((j) => j.status === 'PENDING_APPROVAL').length, unit: '个' },
-    { label: 'HC 总量', value: hcTotal, unit: '人' },
-    { label: '已录用', value: hcUsed, unit: '人' },
-    {
-      label: '在流程候选人',
-      value: all.reduce((s, j) => s + (j._count?.applications ?? 0), 0),
-      unit: '人',
-    },
+    { label: '招聘中', value: summary?.open ?? 0, unit: '个' },
+    { label: '待审批', value: summary?.pendingApproval ?? 0, unit: '个' },
+    { label: 'HC 总量', value: summary?.headcount ?? 0, unit: '人' },
+    { label: '已录用', value: summary?.hcUsed ?? 0, unit: '人' },
+    { label: '在流程候选人', value: summary?.inFlow ?? 0, unit: '人' },
   ];
 
   return (
@@ -401,7 +400,7 @@ export function JobsPage() {
                   <span className="u-flex-gap-16">
                     <span>全部 {t} 个职位</span>
                     <span>
-                      HC 已用 <b className="hf-td--num">{hcUsed}</b> / {hcTotal}
+                      HC 已用 <b className="hf-td--num">{summary?.hcUsed ?? 0}</b> / {summary?.headcount ?? 0}
                     </span>
                   </span>
                 ),

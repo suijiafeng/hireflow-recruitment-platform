@@ -187,6 +187,52 @@ describe('职位与应聘数据范围及对比参数回归', () => {
       body: JSON.stringify(body),
     });
 
+  it('职位列表汇总按范围内全部职位计算，分页和状态页签不会把它缩小', async () => {
+    await prisma.job.update({ where: { id: 'local' }, data: { status: 'OPEN', headcount: 3 } });
+    await prisma.job.update({ where: { id: 'child' }, data: { status: 'PENDING_APPROVAL', headcount: 2 } });
+    await prisma.job.update({ where: { id: 'foreign' }, data: { status: 'OPEN', headcount: 9 } });
+    await prisma.application.update({ where: { id: 'application-root' }, data: { status: 'HIRED' } });
+
+    const get = (path: string) => fetch(`${base}${path}`).then((response) => response.json());
+    const page = await get('/jobs?page=1&pageSize=1');
+    expect(page.total).toBe(2);
+    expect(page.items).toHaveLength(1);
+    expect(page.summary).toEqual({
+      open: 1,
+      pendingApproval: 1,
+      headcount: 5,
+      hcUsed: 1,
+      inFlow: 3,
+    });
+
+    const openOnly = await get('/jobs?page=1&pageSize=1&status=OPEN');
+    expect(openOnly.total).toBe(1);
+    expect(openOnly.items[0].status).toBe('OPEN');
+    expect(openOnly.summary).toEqual(page.summary);
+
+    const childOnly = await get('/jobs?departmentId=dept-child');
+    expect(childOnly.total).toBe(1);
+    expect(childOnly.summary).toMatchObject({ open: 0, pendingApproval: 1, headcount: 2, hcUsed: 0, inFlow: 1 });
+
+    const outside = await get('/jobs?departmentId=dept-other');
+    expect(outside.total).toBe(0);
+    expect(outside.items).toEqual([]);
+    expect(outside.summary.headcount).toBe(0);
+
+    const created = await request('/jobs', {
+      title: '汇总回归职位',
+      departmentId: 'dept-child',
+      headcount: 4,
+    });
+    expect(created.status).toBe(201);
+    const after = await get('/jobs?page=1&pageSize=1');
+    expect(after.total).toBe(3);
+    expect(after.items).toHaveLength(1);
+    expect(after.summary.open).toBe(page.summary.open + 1);
+    expect(after.summary.headcount).toBe(page.summary.headcount + 4);
+    expect(after.summary.pendingApproval).toBe(page.summary.pendingApproval);
+  });
+
   it('拒绝范围外职位修改、范围外建岗及把本部门职位迁到范围外，且不写入', async () => {
     const before = await prisma.job.findMany({ orderBy: { id: 'asc' } });
     expect(

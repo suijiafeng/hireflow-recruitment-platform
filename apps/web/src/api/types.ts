@@ -7,6 +7,15 @@ export interface Paginated<T> {
   items: T[];
 }
 
+/** 职位列表顶部的口径：范围内全部职位，不随分页或状态页签缩小 */
+export interface JobListSummary {
+  open: number;
+  pendingApproval: number;
+  headcount: number;
+  hcUsed: number;
+  inFlow: number;
+}
+
 export interface Department {
   id: string;
   name: string;
@@ -58,6 +67,8 @@ export interface Job {
   hiringManager: UserBrief | null;
   scorecardTemplate?: ScorecardDimension[] | null;
   _count?: { applications: number };
+  /** 已入职 + 已接受 Offer 的在途人数 */
+  hcUsed?: number;
   createdAt: string;
 }
 

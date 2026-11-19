@@ -25,4 +25,9 @@ export class QueryJobsDto {
   @IsOptional()
   @IsEnum(JobStatus)
   status?: JobStatus;
+
+  @ApiPropertyOptional({ description: '按所属部门筛选' })
+  @IsOptional()
+  @IsString()
+  departmentId?: string;
 }

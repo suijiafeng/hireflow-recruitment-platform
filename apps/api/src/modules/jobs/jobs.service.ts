@@ -27,15 +27,32 @@ export class JobsService {
   ) {}
 
   async list(query: QueryJobsDto, user?: JwtUser) {
-    const { page = 1, pageSize = 20, keyword, status } = query;
+    const { page = 1, pageSize = 20, keyword, status, departmentId } = query;
     // 数据行级权限：用人经理仅本部门职位
     const deptScope = user ? departmentScopeOf(user) : null;
-    const where: Prisma.JobWhereInput = {
-      ...(keyword ? { title: { contains: keyword, mode: 'insensitive' } } : {}),
-      ...(status ? { status } : {}),
-      ...(deptScope ? { departmentId: { in: deptScope } } : {}),
+    const empty = {
+      total: 0,
+      page,
+      pageSize,
+      items: [] as Array<never>,
+      summary: { open: 0, pendingApproval: 0, headcount: 0, hcUsed: 0, inFlow: 0 },
     };
-    const [total, items] = await this.prisma.$transaction([
+    // 显式选了范围外的部门：空结果，不把汇总放宽到其他部门
+    if (departmentId && !inDepartmentScope(deptScope, departmentId)) return empty;
+
+    const departmentFilter = departmentId ?? (deptScope ? { in: deptScope } : undefined);
+    // 汇总跟搜索、部门、数据范围走，但不跟状态页签和分页走。
+    // 页签是在同一批职位里切片；若汇总也跟着切片，第一页的「招聘中 / HC 总量」
+    // 会小于大盘的在招职位，新建一条职位还可能把编制更大的旧职位挤出本页，总数不升反降。
+    const summaryWhere: Prisma.JobWhereInput = {
+      ...(keyword ? { title: { contains: keyword, mode: 'insensitive' } } : {}),
+      ...(departmentFilter ? { departmentId: departmentFilter } : {}),
+    };
+    const where: Prisma.JobWhereInput = {
+      ...summaryWhere,
+      ...(status ? { status } : {}),
+    };
+    const [total, items, open, pendingApproval, headcountAgg, hcUsed, inFlow] = await this.prisma.$transaction([
       this.prisma.job.count({ where }),
       this.prisma.job.findMany({
         where,
@@ -48,21 +65,41 @@ export class JobsService {
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
+      this.prisma.job.count({ where: { ...summaryWhere, status: 'OPEN' } }),
+      this.prisma.job.count({ where: { ...summaryWhere, status: 'PENDING_APPROVAL' } }),
+      this.prisma.job.aggregate({ where: summaryWhere, _sum: { headcount: true } }),
+      this.prisma.application.count({
+        where: {
+          job: summaryWhere,
+          OR: [{ status: 'HIRED' }, { status: 'ACTIVE', offer: { decision: 'ACCEPTED' } }],
+        },
+      }),
+      this.prisma.application.count({ where: { job: summaryWhere } }),
     ]);
-    // HC 占用：已入职 + 已接受 Offer 的在途者
-    const usage = await this.prisma.application.groupBy({
-      by: ['jobId'],
-      where: {
-        jobId: { in: items.map((j) => j.id) },
-        OR: [{ status: 'HIRED' }, { status: 'ACTIVE', offer: { decision: 'ACCEPTED' } }],
-      },
-      _count: { _all: true },
-    });
+    // HC 占用：已入职 + 已接受 Offer 的在途者（行内进度条仍按本页职位算）
+    const usage = items.length
+      ? await this.prisma.application.groupBy({
+          by: ['jobId'],
+          where: {
+            jobId: { in: items.map((j) => j.id) },
+            OR: [{ status: 'HIRED' }, { status: 'ACTIVE', offer: { decision: 'ACCEPTED' } }],
+          },
+          _count: { _all: true },
+        })
+      : [];
     const usageMap = new Map(usage.map((u) => [u.jobId, u._count._all]));
+    const summary = {
+      open,
+      pendingApproval,
+      headcount: headcountAgg._sum.headcount ?? 0,
+      hcUsed,
+      inFlow,
+    };
     return {
       total,
       page,
       pageSize,
+      summary,
       items: items.map((job) => ({ ...job, hcUsed: usageMap.get(job.id) ?? 0 })),
     };
   }
