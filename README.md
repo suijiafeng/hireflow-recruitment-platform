@@ -116,7 +116,7 @@ flowchart LR
   ai --> rules["规则引擎"]
 ```
 
-开发时 Vite 把 `/api` 代理到 `localhost:3000`。生产镜像里由 nginx 反代到 `API_ORIGIN`，浏览器仍然访问同源的 `/api`。候选人门户走 `/portal/.../:token`，不经过登录。
+开发时 Vite 把 `/api` 代理到 API 的 `PORT`：进程环境变量优先，否则读 `apps/api/.env`，都没写就是 `3000`。改端口不用再改前端配置。生产镜像里由 nginx 反代到 `API_ORIGIN`，浏览器仍然访问同源的 `/api`。候选人门户走 `/portal/.../:token`，不经过登录。
 
 ## 快速开始
 
@@ -140,6 +140,8 @@ npm run dev
 
 健康检查是 `GET /api/health`。
 
+本地不启动 MinIO 时，API 日志里会出现「对象存储不可用……文件上传功能将降级」。这条警告不影响登录，也不影响除文件上传以外的页面；简历和入职材料可以改用文本粘贴。
+
 PGlite 对数据目录没有跨进程锁。`5433` 上已经有实例时，脚本会拒绝再开一个；两个进程同时写同一个 `.pgdata` 会损坏 WAL。需要重来时用 `npm run db:reset`。
 
 ### 环境变量
@@ -156,7 +158,7 @@ API 读 `apps/api/.env`。下表的默认值就是 `.env.example` 里的值，�
 | `ANTHROPIC_API_KEY` | 留空则走规则引擎 | 空 | 否 |
 | `ANTHROPIC_MODEL` | 模型名 | `claude-opus-4-8` | 否 |
 | `ANTHROPIC_BASE_URL` | 兼容网关地址 | 空 | 否 |
-| `PORT` | API 端口 | `3000` | 否 |
+| `PORT` | API 端口。开发时 Vite 的 `/api` 代理跟着这个值走 | `3000` | 否 |
 | `SWAGGER_ENABLED` | 生产环境是否挂 `/api/docs`。非 production 默认开启 | 未设置 | 否 |
 | `ESIGN_STAFF_SIGN` | 生产环境是否允许后台代签合同 | 未设置 | 否 |
 | `CORS_ORIGINS` | 逗号分隔的跨域白名单。空则不开启 CORS | 空 | 否 |
@@ -190,7 +192,7 @@ Web 容器还要 `API_ORIGIN`（镜像默认 `api:3000`），给 nginx 做 `/api
 
 | 命令 | 作用 |
 | --- | --- |
-| `npm test` | API 的 Jest。当前是 9 个套件、54 个用例 |
+| `npm test` | API 的 Jest，然后是 Web 的 Vitest。当前是 API 15 套件 / 121 用例，Web 6 个文件 / 22 用例 |
 | `npm run lint` | `apps/web` 的 oxlint |
 | `npm run typecheck` | 构建 shared，再对 API 和 Web 跑 `tsc` |
 | `npm run build` | shared、API、Web |
@@ -287,7 +289,7 @@ hireflow-recruitment-platform/
 - 登录限流存在单个进程的内存里。
 - 没有把 Prisma 的唯一约束和外键错误映射成 409 / 404 的全局过滤器。
 - 简历抽字只覆盖 PDF 和纯文本。Word 不会被解析。
-- 自动化测试在 API：权限范围、脱敏、门户工作日、登录限流、权限守卫、启动时的密钥检查、规则引擎、Offer 状态机和健康检查。前端没有测试。
+- 自动化测试分两处。API 覆盖权限范围、脱敏、门户工作日、登录限流、权限守卫、启动时的密钥检查、规则引擎、Offer 状态机、职位汇总和健康检查。Web 覆盖登录后退、阶段编辑、职位汇总、面试安排弹窗和开发代理端口。
 - 候选人和职位可以物理删除。应聘上的淘汰和撤回是状态变更。操作会写入 activity log。
 
 ## 许可证
