@@ -2,9 +2,28 @@
 
 给招聘团队用的全栈 ATS：职位、候选人、面试、Offer 和入职在同一条流程里。界面上的产品名是 ART 智能招聘。
 
-![数据大盘：漏斗、待办和投递趋势](./docs/screenshots/dashboard.png)
-
-![招聘看板：按阶段拖动候选人](./docs/screenshots/pipeline.png)
+<table>
+  <tr>
+    <td width="400" valign="top">
+      <img src="./docs/screenshots/pipeline.webp" width="400" alt="招聘看板" />
+      <br />看板：按阶段拖动候选人
+    </td>
+    <td width="400" valign="top">
+      <img src="./docs/screenshots/insights.webp" width="400" alt="数据洞察" />
+      <br />洞察：渠道、面试官和招聘周期
+    </td>
+  </tr>
+  <tr>
+    <td width="400" valign="top">
+      <img src="./docs/screenshots/offers.webp" width="400" alt="录用管理" />
+      <br />录用：审批、发送和候选人答复
+    </td>
+    <td width="400" valign="top">
+      <img src="./docs/screenshots/dashboard-mobile.webp" width="400" alt="手机宽度的数据大盘" />
+      <br />手机宽度：指标收成两列
+    </td>
+  </tr>
+</table>
 
 ## 功能
 
