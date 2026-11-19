@@ -9,9 +9,9 @@ import type { ThemeConfig } from 'antd';
  * - 阴影只留 2 档，卡片层级靠描边而非投影
  */
 export const BRAND = {
-  primary: '#2563EB',
-  primaryDark: '#1E40AF', // 主色深阶：hover/active
-  primary50: '#EFF6FF', // 主色浅底：选中态/强调底，不占色相位
+  primary: '#18181B', // 唯一强调色：墨黑，只用在主按钮、激活态、焦点
+  primaryDark: '#3F3F46', // hover：近黑按钮略提亮，变化才看得见
+  primary50: '#F4F4F5', // 选中浅底
 
   success: '#059669',
   success50: '#ECFDF5',
@@ -62,6 +62,10 @@ export function buildTheme(disableMotion: boolean): ThemeConfig {
   return {
     token: {
       colorPrimary: BRAND.primary,
+      colorPrimaryHover: BRAND.primaryDark,
+      colorPrimaryActive: '#09090B',
+      colorPrimaryBg: BRAND.primary50,
+      colorPrimaryBgHover: '#E4E4E7',
       colorInfo: BRAND.primary,
       colorLink: BRAND.primary,
       colorSuccess: BRAND.success,
@@ -109,7 +113,9 @@ export function buildTheme(disableMotion: boolean): ThemeConfig {
       boxShadowSecondary: SHADOW.md,
 
       motion: !disableMotion,
-      motionDurationMid: '0.2s',
+      motionDurationFast: '0.12s',
+      motionDurationMid: '0.15s',
+      motionDurationSlow: '0.15s',
       motionEaseInOut: 'cubic-bezier(0.4, 0, 0.2, 1)',
 
       // 控件高：紧凑档 36，密集场景 28，表单/登录 44（16px 正文对应）
@@ -154,7 +160,7 @@ export function buildTheme(disableMotion: boolean): ThemeConfig {
         itemBorderRadius: 6,
         itemHeight: 38,
         itemPaddingInline: 12,
-        darkItemSelectedBg: 'rgba(37, 99, 235, 0.16)',
+        darkItemSelectedBg: 'rgba(255, 255, 255, 0.08)',
         darkItemColor: 'rgba(255, 255, 255, 0.72)',
         darkItemHoverBg: 'rgba(255, 255, 255, 0.06)',
         darkItemHoverColor: '#ffffff',
@@ -163,11 +169,11 @@ export function buildTheme(disableMotion: boolean): ThemeConfig {
         iconSize: 16,
       },
       /**
-       * 对齐原来手写的 .hf-table：表头 40px / 行高 48px / 表头 12px 大写字距、
+       * 对齐 .hf-table：表头 40px / 行高 48px / 表头 13px 中文不加字距、
        * 行分隔用发丝线而表头下沿用主线。数值不要随手改——10 张表全靠这一处统一。
        */
       Table: {
-        headerColor: INK.muted,
+        headerColor: '#71717A',
         headerBg: SURFACE.sunken,
         headerSplitColor: 'transparent', // 原设计表头列之间没有竖线
         rowHoverBg: '#fafbfc',
@@ -200,7 +206,7 @@ export function buildTheme(disableMotion: boolean): ThemeConfig {
         controlHeightLG: 44,
         activeBorderColor: BRAND.primary,
         hoverBorderColor: BRAND.primary,
-        activeShadow: '0 0 0 3px rgba(37, 99, 235, 0.12)',
+        activeShadow: '0 0 0 3px rgba(24, 24, 27, 0.12)',
       },
       // 非警示 Tag 默认灰（装饰性颜色零容忍）
       Tag: {

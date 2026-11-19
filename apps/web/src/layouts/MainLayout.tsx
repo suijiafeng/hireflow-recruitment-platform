@@ -9,7 +9,6 @@ import {
   LogoutOutlined,
   MenuOutlined,
   ProfileOutlined,
-  RocketOutlined,
   ScheduleOutlined,
   SettingOutlined,
   TeamOutlined,
@@ -164,12 +163,12 @@ export function MainLayout() {
       <Sider width={220} breakpoint="xl" collapsedWidth={64}>
         <div className="sider-inner">
           <div className="sider-logo">
-            <div className="sider-logo-mark">
-              <RocketOutlined />
+            <div className="sider-logo-mark" aria-hidden="true">
+              A
             </div>
             <div className="sider-logo-text">
               <div className="sider-logo-name">ART 智能招聘</div>
-              <div className="sider-logo-sub">AI Recruiting</div>
+              <div className="sider-logo-sub">招聘工作台</div>
             </div>
           </div>
           <div className="sider-menu-scroll">{menu}</div>
@@ -186,8 +185,8 @@ export function MainLayout() {
       >
         <div className="sider-inner">
           <div className="sider-logo">
-            <div className="sider-logo-mark">
-              <RocketOutlined />
+            <div className="sider-logo-mark" aria-hidden="true">
+              A
             </div>
             <div className="sider-logo-text">
               <div className="sider-logo-name">ART 智能招聘</div>

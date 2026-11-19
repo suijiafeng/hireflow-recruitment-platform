@@ -38,7 +38,7 @@ export function StatCard({
   extra?: string;
 }) {
   return (
-    <Card classNames={{ body: 'stat-card-body' }} hoverable>
+    <Card classNames={{ body: 'stat-card-body' }}>
       <div className="stat-card-inner">
         <IconBadge icon={icon} size="lg" />
         <div className="stat-card-main">

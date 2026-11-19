@@ -1,4 +1,4 @@
-import { CheckOutlined, RocketOutlined } from '@ant-design/icons';
+import { CheckOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { App, Button, Result, Spin } from 'antd';
 import type { AxiosError } from 'axios';
@@ -35,7 +35,7 @@ export function PortalShell({
       <div className="hf-portal-head">
         <div className="hf-portal-brand">
           <span className="hf-portal-mark">
-            <RocketOutlined className="hf-portal-mark-ico" />
+            A
           </span>
           {company}
         </div>
