@@ -9,9 +9,9 @@ import type { ThemeConfig } from 'antd';
  * - 阴影只留 2 档，卡片层级靠描边而非投影
  */
 export const BRAND = {
-  primary: '#18181B', // 唯一强调色：墨黑，只用在主按钮、激活态、焦点
-  primaryDark: '#3F3F46', // hover：近黑按钮略提亮，变化才看得见
-  primary50: '#F4F4F5', // 选中浅底
+  primary: '#2563EB',
+  primaryDark: '#1E40AF', // 主色深阶：hover/active
+  primary50: '#EFF6FF', // 主色浅底：选中态/强调底，不占色相位
 
   success: '#059669',
   success50: '#ECFDF5',
@@ -62,10 +62,6 @@ export function buildTheme(disableMotion: boolean): ThemeConfig {
   return {
     token: {
       colorPrimary: BRAND.primary,
-      colorPrimaryHover: BRAND.primaryDark,
-      colorPrimaryActive: '#09090B',
-      colorPrimaryBg: BRAND.primary50,
-      colorPrimaryBgHover: '#E4E4E7',
       colorInfo: BRAND.primary,
       colorLink: BRAND.primary,
       colorSuccess: BRAND.success,
@@ -160,7 +156,7 @@ export function buildTheme(disableMotion: boolean): ThemeConfig {
         itemBorderRadius: 6,
         itemHeight: 38,
         itemPaddingInline: 12,
-        darkItemSelectedBg: 'rgba(255, 255, 255, 0.08)',
+        darkItemSelectedBg: 'rgba(37, 99, 235, 0.16)',
         darkItemColor: 'rgba(255, 255, 255, 0.72)',
         darkItemHoverBg: 'rgba(255, 255, 255, 0.06)',
         darkItemHoverColor: '#ffffff',
@@ -206,7 +202,7 @@ export function buildTheme(disableMotion: boolean): ThemeConfig {
         controlHeightLG: 44,
         activeBorderColor: BRAND.primary,
         hoverBorderColor: BRAND.primary,
-        activeShadow: '0 0 0 3px rgba(24, 24, 27, 0.12)',
+        activeShadow: '0 0 0 3px rgba(37, 99, 235, 0.12)',
       },
       // 非警示 Tag 默认灰（装饰性颜色零容忍）
       Tag: {

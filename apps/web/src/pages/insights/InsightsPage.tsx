@@ -292,8 +292,8 @@ export function InsightsPage() {
                       <ChartTip
                         title={s.stage}
                         rows={[
-                          { color: '#A1A1AA', value: s.p50Days ?? '—', label: 'P50 天' },
-                          { color: '#18181B', value: s.p90Days ?? '—', label: 'P90 天' },
+                          { color: '#60A5FA', value: s.p50Days ?? '—', label: 'P50 天' },
+                          { color: '#1E40AF', value: s.p90Days ?? '—', label: 'P90 天' },
                           { value: s.samples, label: '样本' },
                         ]}
                       />

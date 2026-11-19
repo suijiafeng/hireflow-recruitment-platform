@@ -23,7 +23,7 @@ const PAGE_SIZE = 20;
 /** 匹配分：≥85 正向绿，≥70 中性墨，其余偏弱用琥珀。不拿品牌色给每一行上色。 */
 function scoreColor(score: number) {
   if (score >= 85) return '#059669';
-  if (score >= 70) return '#52525B';
+  if (score >= 70) return '#2563EB';
   return '#B45309';
 }
 

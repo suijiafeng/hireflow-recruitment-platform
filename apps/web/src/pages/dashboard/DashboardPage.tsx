@@ -15,7 +15,7 @@ import { useUrlState } from '../../hooks/useUrlState';
 import { pressable } from '../../utils/pressable';
 
 /** 漏斗阶梯：越往后越深，同一墨色，不另开色相 */
-const FUNNEL_SHADES = ['#E4E4E7', '#D4D4D8', '#A1A1AA', '#71717A', '#52525B', '#18181B'];
+const FUNNEL_SHADES = ['#93C5FD', '#7DB1FB', '#60A5FA', '#3B82F6', '#2563EB', '#1E40AF'];
 
 /**
  * 漏斗阶段行：条长 = 累计到达，条内深色段 = 当前停留；
@@ -62,7 +62,7 @@ function FunnelStageRow({
             <svg className="funnel-svg" viewBox="0 0 100 16" preserveAspectRatio="none" aria-hidden="true">
               <line className="chart-svg-base" x1="0" x2="100" y1="15.5" y2="15.5" />
               <rect x="0" y="3" width={widthPct} height="10" fill={shade} />
-              <rect x="0" y="3" width={(widthPct * stayPct) / 100} height="10" fill="rgba(24, 24, 27, 0.45)" />
+              <rect x="0" y="3" width={(widthPct * stayPct) / 100} height="10" fill="rgba(23, 24, 26, 0.32)" />
             </svg>
           </div>
           <span className="funnel-num">{stage.reached}</span>

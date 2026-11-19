@@ -498,7 +498,7 @@ export function OnboardingPage() {
             <span className="hf-bar-track">
               <span
                 className="hf-bar-fill"
-                style={cssVars({ '--w': `${Math.max(pct, 2)}%`, '--c': complete ? '#059669' : '#18181B' })}
+                style={cssVars({ '--w': `${Math.max(pct, 2)}%`, '--c': complete ? '#059669' : '#2563EB' })}
               />
             </span>
             <span className="hf-progress-num">

@@ -4,18 +4,18 @@ import { EmptyBlock } from './ui';
 
 /**
  * 图表：SVG + 水平虚线网格 / 底轴刻度，不用 div 色条冒充。
- * 系列色只有一档墨色阶梯（深浅区分系列，不另开色相）。
+ * 系列色用原来的品牌蓝和青色。
  * 悬停走 Tooltip；空数据走 EmptyBlock。
  */
 
-/** 分类两系列：墨色 + 同族浅灰，避免蓝青撞色 */
-export const SERIES = { ink: '#18181B', mist: '#A1A1AA' } as const;
+/** 分类两系列：品牌蓝 + 青色，和改版前的图表色板一致 */
+export const SERIES = { ink: '#2563EB', mist: '#06B6D4' } as const;
 /** 有序四级阶梯（浅→深）：投递 → 进面 → Offer → 入职 */
-export const ORDINAL = ['#D4D4D8', '#A1A1AA', '#52525B', '#18181B'] as const;
-/** 哑铃两档（同色系两级） */
-export const DUMBBELL = { p50: '#A1A1AA', p90: '#18181B' } as const;
-/** 基线刻度用墨色（参考标记不占用系列色） */
-const REF_INK = 'rgba(24, 24, 27, 0.45)';
+export const ORDINAL = ['#93C5FD', '#60A5FA', '#2563EB', '#1E40AF'] as const;
+/** 哑铃两档 */
+export const DUMBBELL = { p50: '#60A5FA', p90: '#1E40AF' } as const;
+/** 基线刻度不占用系列色 */
+const REF_INK = 'rgba(15, 23, 42, 0.45)';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -364,7 +364,7 @@ export function DumbbellChart({
                           x2={x2}
                           y1="10"
                           y2="10"
-                          stroke="#D4D4D8"
+                          stroke="#BFDBFE"
                           strokeWidth="2"
                           vectorEffect="non-scaling-stroke"
                         />
