@@ -228,7 +228,7 @@ export function OnboardingPortalPage() {
         <div className="hf-bar-track">
           <span
             className="hf-bar-fill"
-            style={cssVars({ '--w': `${Math.max(pct, 2)}%`, '--c': done ? '#059669' : '#18181B' })}
+            style={cssVars({ '--w': `${Math.max(pct, 2)}%`, '--c': done ? '#059669' : '#2563EB' })}
           />
         </div>
       </div>
