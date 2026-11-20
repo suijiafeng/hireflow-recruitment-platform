@@ -237,7 +237,7 @@ describe('Copilot SSE / 工具权限 / 待确认操作 端到端', () => {
 
     const confirm = await json(`/copilot/actions/${actions[0].id}/confirm`, {});
     expect(confirm.status).toBe(200);
-    expect(confirm.body).toMatchObject({ status: 'EXECUTED', result: { link: '/candidates/c-zw' } });
+    expect(confirm.body).toMatchObject({ status: 'EXECUTED', result: { link: '/candidates?candidate=c-zw' } });
     expect((await prisma.application.findUniqueOrThrow({ where: { id: 'a-zw' } })).stageId).toBe('s-fe-2');
     const audit = await prisma.activityLog.findFirst({ where: { action: ACTIVITY_ACTIONS.COPILOT_ACTION_EXECUTED, entityId: actions[0].id } });
     expect(audit).toBeTruthy();

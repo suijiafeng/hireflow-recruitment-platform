@@ -69,7 +69,7 @@ export interface CopilotToolStep {
 /** SSE 事件（event: 名称，data: JSON） */
 export interface CopilotStreamEvents {
   /** 开流：本轮用的引擎（与 AI 来源标注口径一致） */
-  meta: { conversationId: string; provider: string; mode: 'llm' | 'mock'; degraded: boolean };
+  meta: { conversationId: string; provider: string; model?: string; mode: 'llm' | 'mock'; degraded: boolean };
   /** 文本增量 */
   text: { delta: string };
   tool_start: CopilotToolStep;
@@ -81,6 +81,7 @@ export interface CopilotStreamEvents {
     aborted: boolean;
     degraded: boolean;
     provider: string;
+    model?: string;
     usage: { inputTokens: number; outputTokens: number };
     /** 因迭代 / 超时 / 成本上限提前收尾时的说明 */
     truncated?: string;

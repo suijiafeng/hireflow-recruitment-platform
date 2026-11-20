@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { CurrentUser, type JwtUser } from '../../common/decorators/current-user.decorator';
@@ -24,6 +24,13 @@ export class CopilotController {
   @ApiOperation({ summary: 'Copilot 引擎 / 可用工具 / 推荐问题' })
   status(@CurrentUser() user: JwtUser) {
     return this.copilot.status(user);
+  }
+
+  @Get('context')
+  @ApiOperation({ summary: '解析页面上下文（候选人 / 职位），不在数据范围内返回 null' })
+  async context(@Query('type') type: string, @Query('id') id: string, @CurrentUser() user: JwtUser) {
+    if ((type !== 'candidate' && type !== 'job') || !id || id.length > 64) return { context: null };
+    return { context: await this.copilot.resolveContext(type, id, user) };
   }
 
   @Get('conversations')

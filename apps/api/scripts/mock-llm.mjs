@@ -11,6 +11,110 @@
 // OBEY_INJECTION=1（默认）：模拟一个「被简历里的注入指令骗到」的模型——给 100 分、把注入文本塞进技能标签。
 // 这样能直观看到后端的确定性防线（证据核对、标签归一化、分数封顶）有没有兜住。
 import http from 'node:http';
+import { createRequire } from 'node:module';
+
+// Copilot（stream + tools）请求：复用后端的规则引擎 MockCopilotProvider 决定「调哪个工具 / 说什么」，
+// 再按 Anthropic / OpenAI 的流式协议原样吐回去——这样真实 SDK 的流式解析、工具调用拼装、用量统计整条链路都被走到。
+// 需要先 build 一次 API（dist/ 里有编译后的 provider）。
+const require = createRequire(import.meta.url);
+let CopilotMock = null;
+try {
+  CopilotMock = require('../dist/modules/copilot/providers/mock.provider.js').MockCopilotProvider;
+} catch {
+  CopilotMock = null;
+}
+
+/** Anthropic / OpenAI 消息 → 后端内部 ChatMessage */
+function toChatMessages(j, isOpenAi) {
+  const out = [];
+  if (isOpenAi) {
+    for (const m of j.messages || []) {
+      if (m.role === 'user') out.push({ role: 'user', content: String(m.content ?? '') });
+      else if (m.role === 'assistant')
+        out.push({
+          role: 'assistant',
+          content: m.content ?? '',
+          toolCalls: (m.tool_calls || []).map((c) => ({ id: c.id, name: c.function.name, args: JSON.parse(c.function.arguments || '{}') })),
+        });
+      else if (m.role === 'tool') {
+        const call = out.flatMap((x) => x.toolCalls || []).find((c) => c.id === m.tool_call_id);
+        out.push({ role: 'tool', toolCallId: m.tool_call_id, name: call?.name ?? '', content: String(m.content ?? '') });
+      }
+    }
+    return out;
+  }
+  const names = new Map();
+  for (const m of j.messages || []) {
+    const blocks = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content || [];
+    if (m.role === 'assistant') {
+      const toolCalls = blocks.filter((b) => b.type === 'tool_use').map((b) => (names.set(b.id, b.name), { id: b.id, name: b.name, args: b.input }));
+      out.push({ role: 'assistant', content: blocks.filter((b) => b.type === 'text').map((b) => b.text).join(''), toolCalls });
+    } else {
+      for (const b of blocks) {
+        if (b.type === 'tool_result')
+          out.push({ role: 'tool', toolCallId: b.tool_use_id, name: names.get(b.tool_use_id) ?? '', content: typeof b.content === 'string' ? b.content : JSON.stringify(b.content) });
+      }
+      const text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join('');
+      if (text) out.push({ role: 'user', content: text });
+    }
+  }
+  return out;
+}
+
+async function streamCopilot(req, res, j, isOpenAi) {
+  const ctrl = new AbortController();
+  res.on('close', () => ctrl.abort());
+  const system = isOpenAi ? (j.messages || []).find((m) => m.role === 'system')?.content ?? '' : String(j.system ?? '');
+  const tools = (j.tools || []).map((t) => (isOpenAi ? { name: t.function.name } : { name: t.name }));
+  const provider = new CopilotMock(Number(process.env.COPILOT_STREAM_DELAY_MS || 30));
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'request-id': 'req_mock' });
+  const write = (event, data) => res.write(isOpenAi ? `data: ${JSON.stringify(data)}\n\n` : `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  let index = 0;
+  let textOpen = false;
+  if (!isOpenAi) write('message_start', { type: 'message_start', message: { id: 'msg_mock', type: 'message', role: 'assistant', model: j.model, content: [], stop_reason: null, usage: { input_tokens: 0, output_tokens: 1 } } });
+  const chunk = (delta, finish = null) => ({ id: 'chatcmpl_mock', object: 'chat.completion.chunk', model: j.model, choices: [{ index: 0, delta, finish_reason: finish }] });
+  let stop = 'end_turn';
+  let usage = { inputTokens: 0, outputTokens: 0 };
+  try {
+    for await (const ev of provider.stream({ system, messages: toChatMessages(j, isOpenAi), tools, maxTokens: j.max_tokens, signal: ctrl.signal })) {
+      if (ev.type === 'text') {
+        if (isOpenAi) write('', chunk({ content: ev.delta }));
+        else {
+          if (!textOpen) write('content_block_start', { type: 'content_block_start', index, content_block: { type: 'text', text: '' } });
+          textOpen = true;
+          write('content_block_delta', { type: 'content_block_delta', index, delta: { type: 'text_delta', text: ev.delta } });
+        }
+      } else if (ev.type === 'tool_call') {
+        const args = JSON.stringify(ev.call.args);
+        const id = isOpenAi ? `call_${Date.now()}` : `toolu_${Date.now()}`;
+        if (isOpenAi) {
+          write('', chunk({ tool_calls: [{ index: 0, id, type: 'function', function: { name: ev.call.name, arguments: args.slice(0, 5) } }] }));
+          write('', chunk({ tool_calls: [{ index: 0, function: { arguments: args.slice(5) } }] }));
+        } else {
+          if (textOpen) write('content_block_stop', { type: 'content_block_stop', index: index++ });
+          textOpen = false;
+          write('content_block_start', { type: 'content_block_start', index, content_block: { type: 'tool_use', id, name: ev.call.name, input: {} } });
+          write('content_block_delta', { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: args.slice(0, 5) } });
+          write('content_block_delta', { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: args.slice(5) } });
+          write('content_block_stop', { type: 'content_block_stop', index: index++ });
+        }
+        stop = isOpenAi ? 'tool_calls' : 'tool_use';
+      } else if (ev.type === 'usage') usage = ev;
+    }
+  } catch {
+    return res.end();
+  }
+  if (isOpenAi) {
+    write('', chunk({}, stop === 'end_turn' ? 'stop' : stop));
+    write('', { id: 'chatcmpl_mock', object: 'chat.completion.chunk', model: j.model, choices: [], usage: { prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens } });
+    res.write('data: [DONE]\n\n');
+  } else {
+    if (textOpen) write('content_block_stop', { type: 'content_block_stop', index });
+    write('message_delta', { type: 'message_delta', delta: { stop_reason: stop, stop_sequence: null }, usage: { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens } });
+    write('message_stop', { type: 'message_stop' });
+  }
+  res.end();
+}
 
 const PORT = Number(process.env.PORT || 3311);
 const config = {
@@ -129,6 +233,11 @@ http
         userHead: user.slice(0, 300),
       });
       if (log.length > 500) log.splice(0, log.length - 500);
+      if (j.stream) {
+        if (!CopilotMock) return send(501, { error: { type: 'not_supported', message: '先 npm run build -w apps/api' } });
+        await sleep(Math.min(config.delayMs, 400));
+        return streamCopilot(req, res, j, isOpenAi);
+      }
       await sleep(config.delayMs);
       if (res.destroyed || res.socket?.destroyed) return; // 调用方已超时断开
       if (config.failRate && Math.random() < config.failRate) return send(529, { error: { type: 'overloaded_error', message: 'mock overloaded' } });

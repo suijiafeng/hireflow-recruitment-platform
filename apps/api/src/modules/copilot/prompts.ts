@@ -22,7 +22,7 @@ const SCOPE_NAMES: Record<string, string> = {
 };
 
 /**
- * Copilot system prompt：角色、数据范围、写操作必须确认、注入防护（与第 1 轮 INSTRUCTION_HIERARCHY 同口径，
+ * Copilot system prompt：角色、数据范围、写操作必须确认、注入防护（与 AI 管线的 INSTRUCTION_HIERARCHY 同口径，
  * 但输出是自然语言 Markdown 而不是 JSON）。
  */
 export function buildSystemPrompt(user: JwtUser, context: CopilotContextInfo | null, now = new Date()): string {

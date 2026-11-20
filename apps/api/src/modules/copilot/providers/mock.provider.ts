@@ -196,7 +196,7 @@ export class MockCopilotProvider implements CopilotProvider {
         if (next) return next;
       }
     }
-    if (/职位|岗位|在招|招聘情况|HC/i.test(t)) {
+    if (/职位|岗位|在招|招聘情况|HC/i.test(t) && !r.has('job_pipeline') && !r.has('funnel_insights')) {
       const next = call('list_jobs', {});
       if (next) return next;
     }
@@ -218,8 +218,12 @@ export class MockCopilotProvider implements CopilotProvider {
   private compose(turn: Turn): string {
     const parts: string[] = [];
     let injection = false;
+    const WRITES = ['move_candidate_stage', 'schedule_interview', 'add_candidate_note', 'draft_evaluation', 'reject_application'];
+    const wrote = [...turn.results.keys()].some((k) => WRITES.includes(k));
     for (const [name, res] of turn.results) {
       if (res.injectionSuspected) injection = true;
+      // 提议了写操作：回答只讲提议本身，查询过程留在折叠步骤里
+      if (wrote && !WRITES.includes(name) && res.ok) continue;
       if (!res.ok) {
         parts.push(`- ${toolTitle(name)}没有成功：${res.error ?? '无权限或数据不存在'}`);
         continue;
@@ -233,15 +237,11 @@ export class MockCopilotProvider implements CopilotProvider {
             break;
           }
           parts.push(`找到 **${d.total}** 位候选人${d.total > items.length ? `（展示前 ${items.length} 位）` : ''}：`);
-          parts.push('| 候选人 | 职位 | 阶段 | 匹配分 |\n| --- | --- | --- | --- |');
-          parts.push(
-            items
-              .map((c) => {
-                const a = c.applications?.[0];
-                return `| ${c.name} | ${a?.job ?? '—'} | ${a?.stage ?? '—'} | ${a?.matchScore ?? '—'} |`;
-              })
-              .join('\n'),
-          );
+          const rows = items.map((c) => {
+            const a = c.applications?.[0];
+            return `| ${c.name} | ${a?.job ?? '—'} | ${a?.stage ?? '—'} | ${a?.matchScore ?? '—'} |`;
+          });
+          parts.push(['| 候选人 | 职位 | 阶段 | 匹配分 |', '| --- | --- | --- | --- |', ...rows].join('\n'));
           break;
         }
         case 'get_candidate': {
@@ -259,7 +259,7 @@ export class MockCopilotProvider implements CopilotProvider {
         case 'list_jobs': {
           const items: Json[] = d.items ?? [];
           parts.push(`共 **${d.total}** 个职位${items.length ? '：' : '。'}`);
-          parts.push(items.slice(0, 8).map((j) => `- ${j.title}（${j.department ?? '—'}，${j.status}）· 应聘 ${j.applications} 人 · HC ${j.hcUsed}/${j.headcount}`).join('\n'));
+          parts.push(items.slice(0, 8).map((j) => `- ${j.title}（${j.department ?? '—'}，${j.statusLabel ?? j.status}）· 应聘 ${j.applications} 人 · HC ${j.hcUsed}/${j.headcount}`).join('\n'));
           break;
         }
         case 'job_pipeline': {

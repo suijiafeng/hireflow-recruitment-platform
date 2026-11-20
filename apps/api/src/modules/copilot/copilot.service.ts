@@ -301,7 +301,7 @@ export class CopilotService {
     let error: string | undefined;
     let lastMessageId: string | null = null;
 
-    sink.send('meta', { conversationId, provider: provider.kind, mode: provider.mode, degraded });
+    sink.send('meta', { conversationId, provider: provider.kind, model: provider.model, mode: provider.mode, degraded });
 
     let iteration = 0;
     while (iteration < this.limits.maxIterations) {
@@ -337,7 +337,7 @@ export class CopilotService {
           error = (e instanceof Error ? e.message : String(e)).slice(0, 300);
           provider = this.fallback;
           degraded = true;
-          sink.send('meta', { conversationId, provider: provider.kind, mode: provider.mode, degraded });
+          sink.send('meta', { conversationId, provider: provider.kind, model: provider.model, mode: provider.mode, degraded });
           iteration = 0;
           continue;
         } else {
@@ -409,7 +409,7 @@ export class CopilotService {
       .catch((e: unknown) => this.logger.debug(`AiCallLog 写入失败：${e instanceof Error ? e.message : e}`));
     await this.prisma.copilotConversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
 
-    sink.send('done', { messageId: lastMessageId, aborted, degraded, provider: provider.kind, usage, truncated, title });
+    sink.send('done', { messageId: lastMessageId, aborted, degraded, provider: provider.kind, model, usage, truncated, title });
   }
 
   /** 执行一次工具调用，返回回填给模型的内容（已脱敏 / 装箱 / 截断） */

@@ -9,7 +9,7 @@ export const INJECTION_NOTICE =
 
 /**
  * 不可信文本（简历、面评、备注、候选人自填内容）：先查注入特征，再脱敏 + 转义 + 装箱。
- * 复用第 1 轮的 wrapUntrusted / detectInjection，规则与匹配评分一致。
+ * 复用 AI 管线的 wrapUntrusted / detectInjection，规则与匹配评分一致。
  */
 export class UntrustedCollector {
   suspected = false;

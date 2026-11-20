@@ -47,7 +47,7 @@ export type AnthropicStreamEvent =
   | { type: 'content_block_start'; index: number; content_block: { type: string; id?: string; name?: string } }
   | { type: 'content_block_delta'; index: number; delta: { type: string; text?: string; partial_json?: string } }
   | { type: 'content_block_stop'; index: number }
-  | { type: 'message_delta'; delta: { stop_reason?: string | null }; usage?: { output_tokens?: number } }
+  | { type: 'message_delta'; delta: { stop_reason?: string | null }; usage?: { input_tokens?: number | null; output_tokens?: number } }
   | { type: 'message_stop' };
 
 export interface AnthropicLikeClient {
@@ -124,7 +124,9 @@ export class AnthropicCopilotProvider implements CopilotProvider {
           break;
         }
         case 'message_delta':
+          // message_delta 的用量是累计值；新版 API 也会带 input_tokens
           if (event.usage?.output_tokens != null) outputTokens = event.usage.output_tokens;
+          if (event.usage?.input_tokens) inputTokens = event.usage.input_tokens;
           if (event.delta.stop_reason) stopReason = event.delta.stop_reason;
           break;
         default:

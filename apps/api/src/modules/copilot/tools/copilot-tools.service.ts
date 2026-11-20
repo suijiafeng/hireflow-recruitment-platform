@@ -1,5 +1,9 @@
 import {
+  APPLICATION_STATUS_LABEL,
   EVALUATION_CONCLUSION_LABEL,
+  JOB_STATUS_LABEL,
+  OFFER_APPROVAL_STATUS_LABEL,
+  OFFER_DECISION_LABEL,
   ACTIVITY_ACTIONS,
   COPILOT_READ_TOOLS,
   COPILOT_WRITE_TOOLS,
@@ -56,6 +60,8 @@ interface ToolDef {
   parameters: ToolSpec['parameters'];
 }
 
+/** 枚举 → 中文（模型直接引用，不用自己翻译状态码） */
+const label = (map: Record<string, string>, v: string) => map[v] ?? v;
 const iso = (d: Date | string | null | undefined) => (d ? new Date(d).toISOString() : null);
 const TZ = process.env.COPILOT_TIMEZONE || 'Asia/Shanghai';
 const fmtTime = (d: Date | string) =>
@@ -335,10 +341,13 @@ export class CopilotToolsService {
         jobId: a.job.id,
         job: a.job.title,
         status: a.status,
+        statusLabel: label(APPLICATION_STATUS_LABEL, a.status),
         stage: a.stage.name,
         stages: stages.filter((s) => s.jobId === a.job.id).map((s) => s.name),
         matchScore: a.matchScore,
-        offer: a.offer ? { approvalStatus: a.offer.approvalStatus, decision: a.offer.decision } : null,
+        offer: a.offer
+          ? { approvalStatus: label(OFFER_APPROVAL_STATUS_LABEL, a.offer.approvalStatus), decision: a.offer.decision ? label(OFFER_DECISION_LABEL, a.offer.decision) : null }
+          : null,
         interviews: a.interviews.map((i) => ({
           interviewId: i.id,
           round: i.round,
@@ -365,6 +374,7 @@ export class CopilotToolsService {
       id: j.id,
       title: j.title,
       status: j.status,
+      statusLabel: label(JOB_STATUS_LABEL, j.status),
       department: j.department?.name ?? null,
       hiringManager: j.hiringManager?.name ?? null,
       headcount: j.headcount,
@@ -436,8 +446,8 @@ export class CopilotToolsService {
         offerId: o.id,
         candidate: o.application.candidate.name,
         job: o.application.job.title,
-        approvalStatus: o.approvalStatus,
-        decision: o.decision,
+        approvalStatus: label(OFFER_APPROVAL_STATUS_LABEL, o.approvalStatus),
+        decision: o.decision ? label(OFFER_DECISION_LABEL, o.decision) : null,
         expiresAt: iso(o.expiresAt),
       }));
     return { data: { items }, summary: `${items.length} 条 Offer` };
@@ -574,7 +584,7 @@ export class CopilotToolsService {
     };
   }
 
-  /** 面评草稿：复用第 1 轮 AI 面评草稿能力（同一权限门 + 注入隔离），草稿内容随卡片展示 */
+  /** 面评草稿：复用已有的 AI 面评草稿能力（同一权限门 + 注入隔离），草稿内容随卡片展示 */
   private async proposeEvaluationDraft(args: Args, user: JwtUser): Promise<Proposal> {
     const interviewId = str(args, 'interviewId', { max: 64 });
     const notes = str(args, 'notes', { max: 2000, min: 4 });
@@ -645,7 +655,7 @@ export class CopilotToolsService {
         void moved;
         return {
           message: `已将 ${app?.candidate.name ?? '候选人'} 移到「${app?.stage.name ?? ''}」`,
-          link: app ? `/candidates/${app.candidateId}` : undefined,
+          link: app ? `/candidates?candidate=${app.candidateId}` : undefined,
         };
       }
       case 'schedule_interview': {
@@ -659,7 +669,7 @@ export class CopilotToolsService {
           },
           user,
         )) as { id: string };
-        return { message: `面试已创建（${fmtTime(String(args.scheduledAt))}）`, link: `/interviews?focus=${created.id}` };
+        return { message: `面试已创建（${fmtTime(String(args.scheduledAt))}）`, link: '/interviews' };
       }
       case 'add_candidate_note': {
         const candidateId = String(args.candidateId);
@@ -668,7 +678,7 @@ export class CopilotToolsService {
           note: String(args.note),
           via: 'copilot',
         });
-        return { message: `已在 ${c.name} 的时间轴添加备注`, link: `/candidates/${candidateId}` };
+        return { message: `已在 ${c.name} 的时间轴添加备注`, link: `/candidates?candidate=${candidateId}` };
       }
       case 'draft_evaluation': {
         const interviewId = String(args.interviewId);
@@ -688,7 +698,7 @@ export class CopilotToolsService {
           throw new ConflictException('该候选人的状态在提议之后已被修改，请重新确认');
         }
         await this.applications.reject(id, { reason: String(args.reason), note: (args.note as string | null) ?? undefined }, user);
-        return { message: `已淘汰（原因：${String(args.reason)}）`, link: `/candidates/${current.candidateId}` };
+        return { message: `已淘汰（原因：${String(args.reason)}）`, link: `/candidates?candidate=${current.candidateId}` };
       }
     }
   }
