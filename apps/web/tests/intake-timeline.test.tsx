@@ -119,7 +119,8 @@ describe('上传简历自动建档', () => {
     expect(screen.getByText('该候选人已在此职位流程中')).toBeTruthy();
     await userEvent.click(screen.getByText('林知远'));
     expect(onOpen).toHaveBeenCalledWith('c1');
-  });
+    // 多步弹窗交互，CI 机器上可能超过默认 5s
+  }, 20_000);
 
   it('不支持的格式在选择时就拦下', async () => {
     wrap(<ResumeIntakeModal open onClose={() => {}} onOpenCandidate={() => {}} defaultJobId="job-1" />);
