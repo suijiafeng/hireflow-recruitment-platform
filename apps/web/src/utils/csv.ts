@@ -19,10 +19,15 @@ function escapeCell(value: unknown): string {
 export function downloadCsv(fileName: string, header: string[], rows: Array<Array<unknown>>) {
   const text = [header, ...rows].map((r) => r.map(escapeCell).join(',')).join('\r\n');
   const blob = new Blob([`﻿${text}`], { type: 'text/csv;charset=utf-8;' });
+  downloadBlob(fileName.endsWith('.csv') ? fileName : `${fileName}.csv`, blob);
+}
+
+/** 触发浏览器下载任意文件内容（服务端生成的 Excel 等） */
+export function downloadBlob(fileName: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = fileName.endsWith('.csv') ? fileName : `${fileName}.csv`;
+  a.download = fileName;
   document.body.appendChild(a);
   a.click();
   a.remove();

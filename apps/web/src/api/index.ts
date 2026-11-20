@@ -1,6 +1,8 @@
 import type { AuthUser } from '../stores/auth';
 import { AI_BATCH_TIMEOUT_MS, aiRequest, http } from './client';
 import type {
+  CandidateFilters,
+  IntakeResult,
   AiMeta,
   AiStatus,
   AiUsage,
@@ -113,8 +115,41 @@ export const boardApi = {
 };
 
 export const candidatesApi = {
-  list: (params: { page?: number; pageSize?: number; keyword?: string; stage?: 'screening' }) =>
+  list: (params: CandidateFilters & { page?: number; pageSize?: number }) =>
     http.get<Paginated<Candidate>>('/candidates', { params }).then((r) => r.data),
+  sources: () => http.get<string[]>('/candidates/sources').then((r) => r.data),
+  /** 按当前筛选导出 Excel，返回文件内容与服务端给的文件名 */
+  exportXlsx: async (params: CandidateFilters) => {
+    const res = await http
+      .get<Blob>('/candidates/export', { params, responseType: 'blob', timeout: 60_000 })
+      .catch(async (error: { response?: { data?: unknown } }) => {
+        // 出错时响应体也是 Blob：转回 JSON，extractErrorMessage 才拿得到中文提示
+        const data = error.response?.data;
+        if (data instanceof Blob) {
+          try {
+            error.response!.data = JSON.parse(await data.text());
+          } catch {
+            /* 非 JSON 错误体保持原样 */
+          }
+        }
+        throw error;
+      });
+    const disposition = String(res.headers['content-disposition'] ?? '');
+    const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1];
+    return {
+      blob: res.data,
+      fileName: encoded ? decodeURIComponent(encoded) : '候选人.xlsx',
+      rows: Number(res.headers['x-export-rows'] ?? 0),
+    };
+  },
+  /** 上传简历自动建档：抽取文字 → 去重 → AI 解析 → 投递职位 → AI 评分 */
+  intake: (file: File, data: { jobId: string; source?: string }) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('jobId', data.jobId);
+    if (data.source) form.append('source', data.source);
+    return http.post<IntakeResult>('/candidates/intake', form, aiRequest).then((r) => r.data);
+  },
   create: (data: { name: string; email?: string; phone?: string; source?: string; tags?: string[] }) =>
     http.post<Candidate>('/candidates', data).then((r) => r.data),
   update: (

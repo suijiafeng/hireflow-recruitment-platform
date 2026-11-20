@@ -38,52 +38,10 @@ import { prepareUpload } from '../utils/prepareUpload';
 import { pressable } from '../utils/pressable';
 import { resumeParseState } from '../utils/resumeParse';
 import { useCopyPortalLink } from '../hooks/usePortalLink';
+import { ACTION_LABEL, ActivityTimeline } from './ActivityTimeline';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
-const ACTION_LABEL: Record<string, string> = {
-  'job.created': '创建职位',
-  'job.updated': '更新职位',
-  'job.stages_updated': '调整招聘流程',
-  'candidate.created': '录入候选人',
-  'candidate.updated': '更新候选人',
-  'resume.added': '导入简历',
-  'resume.parsed': 'AI 解析简历',
-  'application.created': '加入职位流程',
-  'application.reapplied': '重复投递',
-  'application.reactivated': '重新激活应聘',
-  'application.stage_changed': '阶段变更',
-  'application.stage_reverted': '阶段回退',
-  'application.rejected': '淘汰候选人',
-  'application.withdrawn': '候选人撤回',
-  'application.scored': 'AI 匹配评分',
-  'application.candidates_compared': 'AI 候选人对比',
-  'application.talent_pool_activated': '人才库唤醒激活',
-  'job.talent_pool_scanned': '人才库扫描',
-  'interview.scheduled': '安排面试',
-  'interview.self_scheduled': '候选人自助选时',
-  'interview.canceled': '取消面试',
-  'evaluation.submitted': '提交面评',
-  'offer.initiated': '创建 Offer',
-  'offer.sent': 'Offer 已发送',
-  'offer.responded': '候选人答复 Offer',
-  'offer.extended': 'Offer 答复期续期',
-  'portal.link_rotated': '重新生成候选人页链接',
-  'portal.link_revoked': '候选人页链接失效',
-  'offer.expired': 'Offer 已过期失效',
-  'onboarding.created': '创建入职单',
-  'onboarding.completed': '确认入职',
-  'onboarding.info_submitted': '候选人提交入职信息',
-  'contract.created': '生成劳动合同',
-  'contract.signed': '候选人确认合同',
-  'webhook.fired': '自动化通知（Webhook）',
-  'candidate.note_added': '添加备注',
-  'copilot.action_executed': 'Copilot 执行操作',
-  'copilot.action_rejected': 'Copilot 操作被取消',
-  'copilot.action_failed': 'Copilot 操作失败',
-  'job.deleted': '删除职位',
-  'candidate.deleted': '删除候选人',
-};
 
 const CONCLUSION_TAG: Record<string, string> = {
   STRONG_YES: 'hf-tag hf-tag--ok',
@@ -748,41 +706,7 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
             </>
           )}
 
-          {tab === 'timeline' && (
-            <>
-              {detail.timeline.length === 0 ? (
-                <EmptyState size="sm" title="暂无操作记录" description="候选人的流转、面试、面评等操作会按时间记录在这里。" />
-              ) : (
-                detail.timeline.map((item, i) => (
-                  <div className="hf-tl" key={item.id ?? i}>
-                    <div className="hf-tl-rail">
-                      <span className={i === 0 ? 'hf-tl-dot hf-tl-dot--on' : 'hf-tl-dot'} />
-                      {i < detail.timeline.length - 1 && <span className="hf-tl-line" />}
-                    </div>
-                    <div className="hf-tl-body">
-                      <div className="hf-tl-head">
-                        <span className="hf-secondary hf-strong">{ACTION_LABEL[item.action] ?? item.action}</span>
-                        <span className="hf-muted">{actorLabel(item)}</span>
-                        <span className="u-flex-1" />
-                        <span className="hf-faint hf-td--num">{dayjs(item.createdAt).format('MM-DD HH:mm')}</span>
-                      </div>
-                      {item.action === 'application.stage_changed' && item.payload && (
-                        <div className="hf-tl-extra">
-                          {String(item.payload.from)} → {String(item.payload.to)}
-                        </div>
-                      )}
-                      {item.action === 'candidate.note_added' && item.payload && (
-                        <div className="hf-tl-extra">
-                          {String(item.payload.note)}
-                          {item.payload.via === 'copilot' && <span className="hf-faint">（经 Copilot 确认添加）</span>}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </>
-          )}
+          {tab === 'timeline' && <ActivityTimeline items={detail.timeline} />}
 
           {/* ---------- 弹窗 ---------- */}
           <FormModal form={resumeForm}
@@ -802,7 +726,7 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
             destroyOnHidden
           >
             <Upload.Dragger
-              accept=".pdf,.txt,.md"
+              accept=".pdf,.docx,.txt,.md"
               maxCount={1}
               // 受控文件列表 + 上传前处理（大图压缩、超限拦截）：列表里显示的就是实际要传的文件
               fileList={resumeFile ? [{ uid: 'picked', name: resumeFile.name, status: 'done' as const }] : []}
@@ -822,8 +746,8 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
               <p className="ant-upload-drag-icon">
                 <InboxOutlined />
               </p>
-              <p className="ant-upload-text">点击或拖入简历原件（PDF / 文本，≤10MB）</p>
-              <p className="ant-upload-hint hf-faint">原件入对象存储留档；PDF 自动抽取文字并进入 AI 解析</p>
+              <p className="ant-upload-text">点击或拖入简历原件（PDF / Word / 文本，≤10MB）</p>
+              <p className="ant-upload-hint hf-faint">原件留档；PDF、Word 自动抽取文字并进入 AI 解析</p>
             </Upload.Dragger>
             <Form form={resumeForm} layout="vertical" onFinish={(values) => addResumeMutation.mutate(values)}>
               <Form.Item

@@ -126,6 +126,7 @@
 .w-160 { width: 160px; }
 .w-220 { width: 220px; }
 .w-240 { width: 240px; }
+.w-200 { width: 200px; }
 .w-260 { width: 260px; }
 
 /* 高弹窗内容区：限高内滚，不撑破视口（配合 Modal classNames.body） */
@@ -3038,3 +3039,25 @@
 .layout-content { display: flex; flex-direction: column; }
 .layout-content > * { width: 100%; }
 .layout-content > :not(.section-tabs) { flex: 1 1 auto; min-height: 0; }
+
+/* 上传简历结果 */
+.intake-results { display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow: auto; }
+.intake-row { display: flex; gap: 10px; padding: 10px 12px; border: 1px solid #eeeff1; border-radius: 8px; }
+.intake-icon { width: 16px; padding-top: 2px; color: #9ca3af; }
+.intake-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.intake-head { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.hf-ok { color: #059669; }
+.hf-warn { color: #d97706; }
+.hf-err { color: #dc2626; }
+.hf-warn-text { color: #b45309; font-size: 12px; }
+.hf-err-text { color: #dc2626; font-size: 12px; }
+
+/* 候选人筛选条 */
+.cand-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 0 24px 12px; }
+.cand-filters .ant-select { min-width: 120px; }
+
+/* 时间轴：AI / 自动 / Copilot 标记 */
+.hf-tl-badge { font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 8px; background: #eef2ff; color: #4338ca; }
+.hf-tl-badge--auto { background: #f3f4f6; color: #4b5563; }
+.hf-tl-badge--copilot { background: #ecfdf5; color: #047857; }
+.hf-tl-filter { margin-bottom: 12px; }
