@@ -25,3 +25,4 @@ coverage/
 .dbdump/
 *.backup-*.sql
 .env.bak-*
+.storage/

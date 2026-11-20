@@ -20,6 +20,19 @@ server {
   gzip on;
   gzip_types text/css application/javascript application/json image/svg+xml;
 
+  # 版本号不外露
+  server_tokens off;
+
+  # 安全响应头（静态站点）。CSP：脚本 / 样式只许本站（antd 的 CSS-in-JS 需要 'unsafe-inline' 样式），
+  # 图片允许 data:/blob:（头像、图表导出），接口同源；frame-ancestors 'none' 禁止被嵌入（点击劫持）。
+  # 注意：location 里一旦写了 add_header，就不再继承这里的——所以下面的 location 用 include 片段重复声明。
+  set $csp "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+  add_header Content-Security-Policy $csp always;
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header X-Frame-Options "DENY" always;
+  add_header Referrer-Policy "no-referrer" always;
+  add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+
   # 上游必须请求期解析：写死主机名时 nginx 启动即解析一次，api 未就绪会直接退出
   # （host not found in upstream），且 Render 私网 IP 每次部署都变，旧 IP 会 502。
   # resolver 列表由镜像入口 15-local-resolvers.envsh 从 /etc/resolv.conf 生成，
@@ -48,9 +61,23 @@ server {
   location /assets/ {
     expires 30d;
     add_header Cache-Control "public, immutable";
+    add_header Content-Security-Policy $csp always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
   }
 
-  # SPA 路由回退（/portal/* 免登录直链、刷新任意路由）
+  # index.html 不缓存：发版后用户刷新即拿到新入口，避免旧 HTML 引用已删除的旧资源（白屏）
+  location = /index.html {
+    add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+    add_header Content-Security-Policy $csp always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+  }
+
+  # SPA 路由回退（/portal/:token 免登录直链、刷新任意路由）——最终都落到上面的 /index.html
   location / {
     try_files $uri $uri/ /index.html;
   }

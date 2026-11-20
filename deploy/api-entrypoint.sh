@@ -1,43 +1,33 @@
 #!/bin/sh
-# API 容器入口：先启动服务监听端口（Render 靠探测端口判定部署是否成功，
-# 迁移/种子若放在监听之前且数据库一时连不上，会拖到探测超时），
-# 数据库迁移与幂等种子放到后台异步执行，完成后自动生效、无需重启容器。
-# 种子可重复执行：权限点/账号 upsert 对齐；角色权限仅 ADMIN 强制全量对齐，
-# 其余角色只在首次创建时写默认值（设置页的自定义权限重启后存活）；
-# 演示业务数据有 job.count() 守卫（见 prisma/seed.ts）
+# API 容器入口：先迁移、后启动。
 #
-# 注意：基础镜像是 node:22-alpine，/bin/sh 是 BusyBox ash（非 bash），
-# 脚本中禁止使用 <<<、[[ ]] 等 bashism。
+#   1. prisma migrate deploy：数据库一时连不上会重试（默认 15 次 × 3 秒）；
+#      重试用尽仍失败 → 以非 0 退出，容器起不来，部署判定失败，旧版本继续服务。
+#      不再「先起服务、后台迁移」——那样迁移失败时新代码会跑在旧表结构上。
+#   2. 基础种子（幂等）：权限点 / 内置角色对齐 + 首个管理员（ADMIN_EMAIL / ADMIN_PASSWORD，
+#      不给密码则随机生成并只在本次日志里打印一次）。NODE_ENV=production 时绝不写演示账号与演示数据。
+#      种子失败同样让部署失败。
+#   3. exec 应用：node 成为 PID 1 的直接替身，SIGTERM 直达应用，优雅退出由 Nest shutdown hooks 处理。
+#
+# 注意：基础镜像是 node:22-alpine，/bin/sh 是 BusyBox ash（非 bash），禁止 <<<、[[ ]] 等 bashism。
+set -eu
 
-MAX_RETRIES=15
-RETRY_INTERVAL=3
+MAX_RETRIES="${MIGRATE_MAX_RETRIES:-15}"
+RETRY_INTERVAL="${MIGRATE_RETRY_INTERVAL:-3}"
+
+attempt=1
+until npx prisma migrate deploy; do
+  if [ "$attempt" -ge "$MAX_RETRIES" ]; then
+    echo "[entrypoint] ✖ 数据库迁移 $MAX_RETRIES 次仍失败，终止部署" >&2
+    exit 1
+  fi
+  echo "[entrypoint] 迁移失败，${RETRY_INTERVAL}s 后重试 ($attempt/$MAX_RETRIES)..." >&2
+  attempt=$((attempt + 1))
+  sleep "$RETRY_INTERVAL"
+done
+
+echo "[entrypoint] 基础种子（幂等）..."
+npm run db:seed
 
 echo "[entrypoint] 启动应用 (端口: ${PORT:-3000}) ..."
-node dist/main.js &
-APP_PID=$!
-
-# 转发终止信号给应用进程，保证 Render 重新部署/重启时能优雅退出
-trap 'kill -TERM "$APP_PID" 2>/dev/null' TERM INT
-
-(
-  attempt=1
-  migrated=0
-  while [ "$attempt" -le "$MAX_RETRIES" ]; do
-    echo "[entrypoint] prisma migrate deploy (尝试 $attempt/$MAX_RETRIES)..."
-    if npx prisma migrate deploy; then
-      migrated=1
-      break
-    fi
-    attempt=$((attempt + 1))
-    sleep "$RETRY_INTERVAL"
-  done
-
-  if [ "$migrated" -eq 1 ]; then
-    echo "[entrypoint] db seed (幂等)..."
-    npm run db:seed || echo "[entrypoint] ⚠ 种子执行失败"
-  else
-    echo "[entrypoint] ⚠ 数据库迁移多次重试仍失败，应用已在运行，但数据库结构可能未就绪"
-  fi
-) &
-
-wait "$APP_PID"
+exec node dist/main.js

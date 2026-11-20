@@ -5,16 +5,16 @@ services:
     image: postgres:18-alpine
     container_name: hireflow-postgres
     environment:
-      POSTGRES_USER: arthr
-      POSTGRES_PASSWORD: arthr_dev_password
-      POSTGRES_DB: arthr
+      POSTGRES_USER: hireflow
+      POSTGRES_PASSWORD: hireflow_dev_password
+      POSTGRES_DB: hireflow
     ports:
       - '5432:5432'
     volumes:
       # postgres:18 镜像的数据卷挂载点是 /var/lib/postgresql（非旧版的 .../data）
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U arthr -d arthr']
+      test: ['CMD-SHELL', 'pg_isready -U hireflow -d hireflow']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -26,8 +26,8 @@ services:
     container_name: hireflow-minio
     command: server /data --console-address ':9001'
     environment:
-      MINIO_ROOT_USER: arthr
-      MINIO_ROOT_PASSWORD: arthr_dev_password
+      MINIO_ROOT_USER: hireflow
+      MINIO_ROOT_PASSWORD: hireflow_dev_password
     ports:
       - '9000:9000'
       - '9001:9001'
