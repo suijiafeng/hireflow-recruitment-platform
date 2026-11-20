@@ -52,6 +52,13 @@ services:
         sync: false
       - key: ANTHROPIC_BASE_URL
         sync: false
+      # OpenAI 兼容（DeepSeek / 通义等）：不用 Anthropic 时填这三项
+      - key: AI_BASE_URL
+        sync: false
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_MODEL
+        sync: false
       - key: S3_ENDPOINT
         sync: false
       - key: S3_PUBLIC_ENDPOINT

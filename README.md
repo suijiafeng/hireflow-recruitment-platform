@@ -32,7 +32,7 @@
 - 面试排期和面评。候选人用免登录链接选时间、答复 Offer、提交入职材料。
 - 权限分两轴：能做什么，以及能看谁的数据（全部、本部门、仅指派、仅本人）。没有 `salary:view` 就看不到薪资。
 - 数据大盘和洞察：漏斗、渠道、面试官和招聘周期。
-- AI 网关负责 JD、简历解析、匹配、面评草稿和漏斗诊断。没有模型 key 时走内置规则引擎。
+- AI 网关负责 JD、简历解析、匹配、面评草稿和漏斗诊断。支持 Anthropic 和 OpenAI 兼容接口（DeepSeek、通义千问、本地 vLLM 等），没有模型 key 时走内置规则引擎。
 
 ## 技术栈
 
@@ -43,6 +43,27 @@ React 19、Vite、Ant Design、NestJS 11、Prisma、PostgreSQL（本地用 PGlit
 - 功能权限和数据范围分开。每次请求按库里的当前角色重算，停用账号不用等 JWT 过期。
 - 看板移动可以带版本号。并发改同一张卡时返回 409。
 - `packages/shared` 同时给前后端提供枚举和权限码。
+- AI 管线有工程兜底：
+  - 统一的超时预算和全局并发上限，超时自动降级到规则引擎。
+  - 简历按不可信数据处理：加边界标签、脱敏联系方式，技能标签落库前归一化，匹配分必须引用简历原文作为证据。
+  - 每次调用写 `AiCallLog`，系统设置里的「AI 用量」面板展示 token、估算成本、P95 延迟、缓存命中率和降级率。
+  - AI 接口按用户限流。
+
+### 接入大模型
+
+在 `apps/api/.env` 里任选一种配置：
+
+```bash
+# Anthropic
+ANTHROPIC_API_KEY="sk-ant-..."
+
+# 或者 OpenAI 兼容接口，例如 DeepSeek
+AI_BASE_URL="https://api.deepseek.com/v1"
+AI_API_KEY="sk-..."
+AI_MODEL="deepseek-chat"
+```
+
+本地没有 key 也能演示真实的调用链路：`node apps/api/scripts/mock-llm.mjs` 会在 3311 端口启动一个同时兼容 Anthropic Messages 和 OpenAI Chat Completions 的模拟服务，把 `ANTHROPIC_BASE_URL` 或 `AI_BASE_URL` 指向它即可。
 
 ## 本地运行
 
