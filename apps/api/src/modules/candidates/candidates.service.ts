@@ -14,6 +14,7 @@ import { maskContactsDeep, maskContactsInText, maskEmail, maskPhone } from '../.
 import type { Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { AiService } from '../ai/ai.service';
+import { sanitizeSkillTags } from '../ai/safety/prompt-safety';
 import { StorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AddResumeDto } from './dto/add-resume.dto';
@@ -35,6 +36,9 @@ export function pendingScreeningWhere(deptScope: string[] | null): Prisma.Candid
     },
   };
 }
+
+/** 简历 PARSING 状态的超时：超过即视为上次解析进程已中断，可重新发起（需大于 AI 调用截止时间） */
+export const PARSE_STALE_MS = 120_000;
 
 @Injectable()
 export class CandidatesService {
@@ -275,17 +279,35 @@ export class CandidatesService {
     const rawText = resume.rawText?.trim();
     if (!rawText) throw new BadRequestException('该简历没有可解析的文本内容');
 
-    await this.prisma.resume.update({ where: { id: resumeId }, data: { parseStatus: 'PARSING' } });
+    // 原子「认领」：同一份简历同时只允许一个解析在跑（防重复点击、多标签页各点一次，每次都是一笔 token）；
+    // PARSING 超过 PARSE_STALE_MS 视为上次进程中途挂掉，允许重新认领，不会永久卡在「解析中」
+    const claimed = await this.prisma.resume.updateMany({
+      where: {
+        id: resumeId,
+        OR: [
+          { parseStatus: { not: 'PARSING' } },
+          { parseStartedAt: null },
+          { parseStartedAt: { lt: new Date(Date.now() - PARSE_STALE_MS) } },
+        ],
+      },
+      data: { parseStatus: 'PARSING', parseStartedAt: new Date() },
+    });
+    if (claimed.count === 0) {
+      throw new ConflictException('这份简历正在解析中，请稍候，完成后会自动刷新');
+    }
     try {
       const { data, meta } = await this.ai.parseResume(rawText);
-      const mergedTags = [...new Set([...resume.candidate.tags, ...data.skills])].slice(0, 15);
+      // 落库前再归一化一次（纵深防御）：标签会进候选人档案、再喂给匹配评分，是注入内容持久化的主要通道
+      const skills = sanitizeSkillTags(data.skills);
+      const mergedTags = [...new Set([...resume.candidate.tags, ...skills])].slice(0, 15);
+      data.skills = skills;
 
       const [updatedResume] = await this.prisma.$transaction([
         this.prisma.resume.update({
           where: { id: resumeId },
           data: {
             parsed: { ...data, aiMeta: meta } as unknown as Prisma.InputJsonValue,
-            skills: data.skills,
+            skills,
             parseStatus: 'DONE',
           },
         }),
@@ -297,7 +319,9 @@ export class CandidatesService {
       await this.activityLog.record(user, ACTIVITY_ACTIONS.RESUME_PARSED, 'Candidate', resume.candidateId, {
         resumeId,
         provider: meta.provider,
-        skills: data.skills,
+        skills,
+        degraded: meta.degraded,
+        ...(data.injectionSuspected ? { injectionSuspected: true } : {}),
       });
       return { ...updatedResume, aiMeta: meta };
     } catch (error) {
