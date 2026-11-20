@@ -4650,3 +4650,18 @@
   .todo-strip-items { flex-wrap: wrap; }
   .todo-strip-item { flex: 1 1 33%; min-width: 33%; }
 }
+
+/* 分数口径标记（规则引擎估算） */
+.hf-source-mark {
+  flex-shrink: 0;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #f4f5f6;
+  color: rgba(26, 26, 26, 0.5);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.hf-select-days { width: 120px; }

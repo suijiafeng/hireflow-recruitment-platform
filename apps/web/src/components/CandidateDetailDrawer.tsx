@@ -3,6 +3,7 @@ import {
   FileTextOutlined,
   InboxOutlined,
   PaperClipOutlined,
+  LoadingOutlined,
   PlusOutlined,
   RobotOutlined,
 } from '@ant-design/icons';
@@ -23,14 +24,16 @@ import type { CSSProperties } from 'react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { applicationsApi, boardApi, candidatesApi, jobsApi, offersApi, resumesApi } from '../api';
-import { extractErrorMessage } from '../api/client';
-import type { ActivityItem, CandidateDetail, DetailApplication, Interview } from '../api/types';
+import { extractErrorMessage, isConflictError, isTimeoutError, TIMEOUT_MESSAGE } from '../api/client';
+import type { ActivityItem, CandidateDetail, DetailApplication, Interview, Resume } from '../api/types';
 import { useAuthStore } from '../stores/auth';
 import { EvaluationModal } from './EvaluationModal';
 import { ScheduleInterviewModal } from './ScheduleInterviewModal';
 import { FormModal } from './FormModal';
+import { RuleScoreMark } from './ui';
 import { prepareUpload } from '../utils/prepareUpload';
 import { pressable } from '../utils/pressable';
+import { resumeParseState } from '../utils/resumeParse';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -84,6 +87,14 @@ const CONCLUSION_TAG: Record<string, string> = {
   NO: 'hf-tag hf-tag--warn',
   STRONG_NO: 'hf-tag hf-tag--err',
 };
+
+const PARSE_STATE_VIEW = {
+  done: { label: '已解析', cls: 'hf-tag hf-tag--ok' },
+  failed: { label: '解析失败', cls: 'hf-tag hf-tag--err' },
+  parsing: { label: '解析中…', cls: 'hf-tag hf-tag--on' },
+  stale: { label: '解析中断', cls: 'hf-tag hf-tag--warn' },
+  pending: { label: '待解析', cls: 'hf-tag' },
+} as const;
 
 function scoreColor(score: number) {
   if (score >= 85) return '#059669';
@@ -227,6 +238,7 @@ function ApplicationBlock({
           <span className="hf-state hf-strong" style={cssVars({ color: scoreColor(score) })}>
             <span className="hf-dot" style={cssVars({ background: scoreColor(score) })} />
             匹配 {score}
+            <RuleScoreMark source={application.matchSource} />
           </span>
         )}
       </div>
@@ -237,6 +249,11 @@ function ApplicationBlock({
           <div className="hf-match-col">
             <div className="hf-caption u-mb-4">命中要求 {report.hits.length}</div>
             <div className="hf-secondary">{report.hits.join(' · ') || '—'}</div>
+            {report.evidence && report.evidence.length > 0 && (
+              <div className="hf-faint u-mt-4">
+                原文依据：{report.evidence.slice(0, 3).map((e) => `「${e.quote}」`).join(' ')}
+              </div>
+            )}
             {report.highlights && <div className="hf-faint u-mt-4">{report.highlights}</div>}
           </div>
           <div className="hf-match-col hf-match-col--miss">
@@ -285,7 +302,8 @@ function ApplicationBlock({
         )}
         {hasPermission(PERMISSIONS.APPLICATION_MOVE) && (
           <span className="hf-link" {...pressable(() => onScore(application.id))}>
-            <RobotOutlined /> {scoring ? '评分中…' : '重新 AI 评分'}
+            <RobotOutlined />{' '}
+            {scoring ? '评分中…' : application.matchSource === 'rule' ? '用 AI 重算' : '重新 AI 评分'}
           </span>
         )}
         {liveOffer ? (
@@ -348,6 +366,9 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
     queryKey: ['candidate-detail', candidateId],
     queryFn: () => candidatesApi.get(candidateId!),
     enabled: Boolean(candidateId),
+    // 有简历在后台解析（含前端等待超时、刷新页面后）时每 3 秒刷新一次，解析完自动停
+    refetchInterval: (query) =>
+      query.state.data?.resumes.some((r) => resumeParseState(r) === 'parsing') ? 3000 : false,
   });
   const jobsQuery = useQuery({
     queryKey: ['jobs', 'options'],
@@ -364,11 +385,27 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
   const parseMutation = useMutation({
     mutationFn: resumesApi.parse,
     onSuccess: (resume) => {
-      message.success(`简历解析完成，提取 ${resume.skills.length} 个技能标签`);
+      if (resume.parsed?.injectionSuspected) {
+        message.warning('解析完成，但简历中含疑似指令注入内容，已过滤可疑标签，请人工复核');
+      } else if (resume.aiMeta?.degraded) {
+        message.warning(`大模型暂不可用，已用规则引擎解析（${resume.skills.length} 个技能标签）`);
+      } else {
+        message.success(`简历解析完成，提取 ${resume.skills.length} 个技能标签`);
+      }
       invalidate();
     },
-    onError: (error) => message.error(extractErrorMessage(error, '解析失败')),
+    onError: (error) => {
+      // 前端等待超时 / 已有解析在跑：后端仍在处理，不算失败；刷新后由轮询接手
+      if (isTimeoutError(error)) message.info(TIMEOUT_MESSAGE);
+      else if (isConflictError(error)) message.info(extractErrorMessage(error));
+      else message.error(extractErrorMessage(error, '解析失败'));
+      invalidate();
+    },
   });
+
+  /** 本页刚点的解析在等待中也算「解析中」（不必等下一次轮询才变状态） */
+  const parseStateOf = (resume: Resume) =>
+    parseMutation.isPending && parseMutation.variables === resume.id ? 'parsing' : resumeParseState(resume);
 
   const addResumeMutation = useMutation({
     mutationFn: (values: { rawText: string }) => candidatesApi.addResume(candidateId!, values),
@@ -423,8 +460,11 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
 
   const scoreMutation = useMutation({
     mutationFn: applicationsApi.score,
-    onSuccess: () => {
-      message.success('AI 匹配评分完成');
+    onSuccess: (result) => {
+      if (result.degradedKept) message.warning('大模型暂不可用，已保留原来的 AI 分数，请稍后重试');
+      else if (result.aiMeta?.degraded) message.warning('大模型暂不可用，本次为规则引擎估算，已标注「规则」');
+      else if (result.matchReport?.injectionSuspected) message.warning('评分完成：简历含疑似指令注入内容，分数已封顶，请人工复核');
+      else message.success('AI 匹配评分完成');
       invalidate();
     },
     onError: (error) => message.error(extractErrorMessage(error, '评分失败')),
@@ -600,17 +640,14 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                       <span className="u-flex-gap-10 u-flex-center-v">
                         <FileTextOutlined />
                         <span className="hf-secondary hf-strong">{resume.fileName ?? '未命名简历'}</span>
-                        <span
-                          className={
-                            resume.parseStatus === 'DONE'
-                              ? 'hf-tag hf-tag--ok'
-                              : resume.parseStatus === 'FAILED'
-                                ? 'hf-tag hf-tag--err'
-                                : 'hf-tag'
-                          }
-                        >
-                          {resume.parseStatus === 'DONE' ? '已解析' : resume.parseStatus === 'FAILED' ? '解析失败' : '待解析'}
+                        <span className={PARSE_STATE_VIEW[parseStateOf(resume)].cls}>
+                          {PARSE_STATE_VIEW[parseStateOf(resume)].label}
                         </span>
+                        {resume.parsed?.injectionSuspected && (
+                          <span className="hf-tag hf-tag--warn" title="简历原文含疑似指令注入内容，可疑标签已过滤，匹配分会封顶">
+                            需人工复核
+                          </span>
+                        )}
                       </span>
                       <span className="u-flex-gap-12">
                         {resume.fileKey && (
@@ -627,9 +664,15 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                           </span>
                         )}
                         {resume.rawText && hasPermission(PERMISSIONS.CANDIDATE_UPDATE) && (
-                          <span className="hf-link" {...pressable(() => parseMutation.mutate(resume.id))}>
-                            <RobotOutlined /> {resume.parseStatus === 'DONE' ? '重新解析' : 'AI 解析'}
-                          </span>
+                          parseStateOf(resume) === 'parsing' ? (
+                            <span className="hf-link--off" aria-busy="true">
+                              <LoadingOutlined /> 解析中…
+                            </span>
+                          ) : (
+                            <span className="hf-link" {...pressable(() => parseMutation.mutate(resume.id))}>
+                              <RobotOutlined /> {resume.parseStatus === 'DONE' ? '重新解析' : 'AI 解析'}
+                            </span>
+                          )
                         )}
                         <span className="hf-faint hf-td--num">{dayjs(resume.createdAt).format('MM-DD')}</span>
                       </span>

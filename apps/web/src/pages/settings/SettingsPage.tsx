@@ -24,6 +24,7 @@ import { FormModal } from '../../components/FormModal';
 import { useUrlState } from '../../hooks/useUrlState';
 import { pressable } from '../../utils/pressable';
 import { departmentOptions } from '../../utils/departments';
+import { AiUsageSection } from './AiUsageSection';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -35,7 +36,7 @@ const DATA_SCOPE_LABEL: Record<string, string> = {
 };
 const PORTAL_ROLE_CODES: string[] = [RoleCode.CANDIDATE, RoleCode.NEW_HIRE];
 
-type Section = 'roles' | 'members' | 'depts' | 'docs' | 'audit';
+type Section = 'roles' | 'members' | 'depts' | 'docs' | 'audit' | 'ai';
 
 const SECTIONS: Array<{ key: Section; label: string }> = [
   { key: 'roles', label: '角色与权限' },
@@ -43,6 +44,7 @@ const SECTIONS: Array<{ key: Section; label: string }> = [
   { key: 'depts', label: '部门管理' },
   { key: 'docs', label: '制度文档' },
   { key: 'audit', label: '审计日志' },
+  { key: 'ai', label: 'AI 用量' },
 ];
 
 /* ============================================================
@@ -1260,6 +1262,7 @@ export function SettingsPage() {
           {section === 'depts' && <DepartmentsSection />}
           {section === 'docs' && <CompanyDocsSection />}
           {section === 'audit' && <AuditSection />}
+          {section === 'ai' && <AiUsageSection />}
         </div>
       </div>
     </div>

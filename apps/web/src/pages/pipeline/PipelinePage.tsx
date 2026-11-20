@@ -53,6 +53,7 @@ import { useDrawerParam } from '../../hooks/useUrlState';
 import { useAuthStore } from '../../stores/auth';
 import { pickDefaultJobId } from '../../utils/jobs';
 import { FormModal } from '../../components/FormModal';
+import { RuleScoreMark } from '../../components/ui';
 import { pressable } from '../../utils/pressable';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
@@ -106,12 +107,17 @@ function CardView({ card, overlay = false }: { card: BoardCard; overlay?: boolea
       <div className="u-flex-between">
         <span className="kanban-card-name">{card.candidate.name}</span>
         {card.matchScore != null && (
-          <Tooltip title={`AI 匹配分 ${card.matchScore}（≥85 优，≥70 良）`}>
-            <span className="kanban-score">
-              <span className={scoreBand(card.matchScore)} />
-              {card.matchScore}
-            </span>
-          </Tooltip>
+          <span className="u-flex-center-v">
+            <Tooltip
+              title={`${card.matchSource === 'rule' ? '规则引擎估算' : 'AI'} 匹配分 ${card.matchScore}（≥85 优，≥70 良）`}
+            >
+              <span className="kanban-score">
+                <span className={scoreBand(card.matchScore)} />
+                {card.matchScore}
+              </span>
+            </Tooltip>
+            <RuleScoreMark source={card.matchSource} />
+          </span>
         )}
       </div>
       <div className="kanban-card-meta">{meta}</div>

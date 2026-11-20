@@ -1,4 +1,4 @@
-import { Card, Empty, Statistic } from 'antd';
+import { Card, Empty, Statistic, Tooltip } from 'antd';
 import type { CSSProperties, ReactNode } from 'react';
 
 /** 数据驱动的尺寸经 CSS 变量传入，静态样式见 styles/app.css */
@@ -66,5 +66,18 @@ export function EmptyBlock({
         {children}
       </Empty>
     </div>
+  );
+}
+
+/**
+ * 分数口径标记：规则引擎（未接大模型或本次降级）打的分和大模型不是一个口径，
+ * 列表 / 看板只显示一个数字时必须标出来，否则排序会误导人。
+ */
+export function RuleScoreMark({ source }: { source?: string | null }) {
+  if (source !== 'rule') return null;
+  return (
+    <Tooltip title="规则引擎估算（未接大模型或本次调用降级），可在候选人详情里「用 AI 重算」">
+      <span className="hf-source-mark">规则</span>
+    </Tooltip>
   );
 }

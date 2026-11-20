@@ -14,6 +14,7 @@ import { QueryErrorResult } from '../../components/QueryErrorResult';
 import { RowActions } from '../../components/RowActions';
 import { useAuthStore } from '../../stores/auth';
 import { FormModal } from '../../components/FormModal';
+import { RuleScoreMark } from '../../components/ui';
 import { useDrawerParam, useUrlParams } from '../../hooks/useUrlState';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
@@ -127,6 +128,7 @@ export function CandidatesPage() {
           <span className="u-flex-gap-6">
             <span className="hf-dot" style={cssVars({ background: scoreColor(score) })} />
             <span className="hf-progress-num">{score}</span>
+            <RuleScoreMark source={app?.matchSource} />
             <span className="hf-bar-track hf-bar-track--thin">
               <span className="hf-bar-fill" style={cssVars({ '--w': `${score}%`, '--c': scoreColor(score) })} />
             </span>

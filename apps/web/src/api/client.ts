@@ -4,6 +4,14 @@ import { loginUrlFor } from '../utils/redirect';
 
 export const http = axios.create({ baseURL: '/api', timeout: 15_000 });
 
+/**
+ * AI 接口单独的超时：后端单次 AI 调用（含排队）最长 AI_DEADLINE_MS（默认 40s）后一定返回（超时即降级），
+ * 前端必须比它长，否则会出现「前端报失败、后端其实成功」。人才库唤醒是批量调用，后端整体预算约 85s。
+ */
+export const AI_TIMEOUT_MS = 60_000;
+export const AI_BATCH_TIMEOUT_MS = 100_000;
+export const aiRequest = { timeout: AI_TIMEOUT_MS } as const;
+
 http.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token;
   if (token) config.headers.Authorization = `Bearer ${token}`;
@@ -29,8 +37,16 @@ export function isConflictError(error: unknown): boolean {
   return axios.isAxiosError(error) && error.response?.status === 409;
 }
 
+/** 前端等待超时（不是后端报错）：后端可能还在处理 */
+export function isTimeoutError(error: unknown): boolean {
+  return axios.isAxiosError(error) && (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') && !error.response;
+}
+
+export const TIMEOUT_MESSAGE = '等待超时：后台可能仍在处理，请稍后刷新查看结果，不要重复提交';
+
 /** 从 axios 错误中提取后端返回的 message，供 message.error 展示 */
 export function extractErrorMessage(error: unknown, fallback = '请求失败，请稍后重试'): string {
+  if (isTimeoutError(error)) return TIMEOUT_MESSAGE;
   if (axios.isAxiosError(error)) {
     const data = error.response?.data as { message?: string | string[] } | undefined;
     if (Array.isArray(data?.message)) return data.message.join('；');

@@ -123,7 +123,7 @@ export function JobsPage() {
       form.setFieldsValue({ description: draft.description, requirement: draft.requirement });
       message.success(
         draft.aiMeta.provider === 'mock'
-          ? 'JD 草稿已生成（当前为规则引擎，配置 ANTHROPIC_API_KEY 后由大模型生成）'
+          ? 'JD 草稿已生成（当前为规则引擎，配置大模型 key 后由大模型生成）'
           : 'AI 已生成 JD 草稿，请检查修改',
       );
     },
