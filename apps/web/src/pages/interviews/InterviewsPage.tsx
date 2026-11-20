@@ -329,7 +329,7 @@ export function InterviewsPage() {
       const url = `${window.location.origin}/portal/interview/${token}`;
       try {
         await navigator.clipboard.writeText(url);
-        message.success('选时链接已复制，请发送给候选人');
+        message.success('选时链接已复制（7 天内有效，选定后失效），请发送给候选人');
       } catch {
         modal.info({
           title: '候选人选时链接',

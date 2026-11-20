@@ -1,6 +1,6 @@
 import { CheckOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Result, Spin } from 'antd';
+import { Button, Spin } from 'antd';
 import type { AxiosError } from 'axios';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
@@ -11,6 +11,7 @@ import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { extractErrorMessage } from '../../api/client';
 import { pressable } from '../../utils/pressable';
 import { useAppDialogs } from '../../hooks/useAppDialogs';
+import { PortalLinkError, isPortalExpired } from './PortalLinkError';
 
 /**
  * 免登录 H5 外壳：深色品牌头 + 单列滚动内容 + 固定底部主操作。
@@ -71,7 +72,9 @@ export function InterviewPortalPage() {
     },
     onError: (error) => {
       /** 并发抢占（409）：刷新剩余时段供重选 */
-      if ((error as AxiosError)?.response?.status === 409) {
+      if (isPortalExpired(error)) {
+        void viewQuery.refetch();
+      } else if ((error as AxiosError)?.response?.status === 409) {
         message.warning('该时段刚被约走，已为您刷新剩余时段');
         setSlotKey(null);
         void queryClient.invalidateQueries({ queryKey: ['portal-interview', token] });
@@ -92,16 +95,7 @@ export function InterviewPortalPage() {
       </PortalShell>
     );
 
-  if (viewQuery.isError || !view)
-    return (
-      <PortalShell title="链接无效或已失效">
-        <Result
-          status="warning"
-          title="无法打开该链接"
-          subTitle={extractErrorMessage(viewQuery.error, '请联系 HR 获取最新链接')}
-        />
-      </PortalShell>
-    );
+  if (viewQuery.isError || !view) return <PortalLinkError error={viewQuery.error} onRetry={() => void viewQuery.refetch()} />;
 
   if (view.status === 'CANCELED')
     return (

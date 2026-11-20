@@ -1,8 +1,8 @@
-import { randomBytes } from 'node:crypto';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { hashSync } from 'bcryptjs';
 import { ACTIVITY_ACTIONS, RoleCode } from '@hireflow/shared';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
+import { randomPassword } from '../../common/password-policy';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { InviteUserDto } from './dto/invite-user.dto';
@@ -70,11 +70,7 @@ export class UsersService {
     }
 
     // 12 位随机初始密码：去掉易混淆字符，方便口头/IM 转交
-    const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@#%';
-    const initialPassword = Array.from(
-      randomBytes(12),
-      (b) => ALPHABET[b % ALPHABET.length],
-    ).join('');
+    const initialPassword = randomPassword();
 
     const userId = await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
@@ -132,7 +128,11 @@ export class UsersService {
         })
       : [];
     await this.prisma.$transaction(async (tx) => {
-      await tx.user.update({ where: { id: userId }, data: { status } });
+      // 停用同时吊销令牌：鉴权虽然每次查状态，但若之后重新启用，停用前签发（可能已泄露）的令牌不应「复活」
+      await tx.user.update({
+        where: { id: userId },
+        data: status === 'DISABLED' ? { status, tokenVersion: { increment: 1 } } : { status },
+      });
       await this.activityLog.record(
         actor,
         ACTIVITY_ACTIONS.USER_STATUS_UPDATED,
@@ -144,6 +144,25 @@ export class UsersService {
     });
     const updated = await this.prisma.user.findUnique({ where: { id: userId }, select: USER_SELECT });
     return { ...updated, openJobs };
+  }
+
+  /**
+   * 管理员重置他人密码：生成一次性随机密码（仅此一次随响应返回，不进审计留痕），
+   * tokenVersion+1 让该账号所有已登录会话立即失效。不能用它重置自己的密码（自己的走「修改密码」，需验证原密码）。
+   */
+  async resetPassword(userId: string, actor: JwtUser) {
+    if (userId === actor.sub) throw new BadRequestException('请在右上角「修改密码」中修改自己的密码');
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('用户不存在');
+    const temporaryPassword = randomPassword();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { passwordHash: hashSync(temporaryPassword, 10), passwordChangedAt: new Date(), tokenVersion: { increment: 1 } },
+      });
+      await this.activityLog.record(actor, ACTIVITY_ACTIONS.USER_PASSWORD_RESET, 'User', userId, { userName: user.name }, tx);
+    });
+    return { temporaryPassword };
   }
 
   /**

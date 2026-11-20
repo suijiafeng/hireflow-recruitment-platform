@@ -86,3 +86,7 @@ services:
       # 手动创建（非 Blueprint）的服务不会读本文件，必须在控制台 Environment 里配置。
       - key: API_ORIGIN
         sync: false
+      # 演示模式：true 时登录页展示演示账号（Render 会把环境变量作为 Docker build arg 传入）。
+      # 正式部署保持 false——生产构建既不展示演示账号，也不会预填任何密码
+      - key: VITE_DEMO_MODE
+        value: "false"

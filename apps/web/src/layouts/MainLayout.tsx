@@ -7,6 +7,7 @@ import {
   FundOutlined,
   HomeOutlined,
   IdcardOutlined,
+  KeyOutlined,
   LogoutOutlined,
   MenuOutlined,
   ProfileOutlined,
@@ -21,6 +22,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { authApi } from '../api';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
+import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { NotificationBell } from '../components/NotificationBell';
 import { useAuthStore } from '../stores/auth';
 import { loginUrlFor } from '../utils/redirect';
@@ -69,6 +71,7 @@ export function MainLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { token, user, logout } = useAuthStore();
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const setUser = useAuthStore((s) => s.setUser);
   const queryClient = useQueryClient();
@@ -221,6 +224,13 @@ export function MainLayout() {
               menu={{
                 items: [
                   {
+                    key: 'password',
+                    icon: <KeyOutlined />,
+                    label: '修改密码',
+                    onClick: () => setPasswordOpen(true),
+                  },
+                  { type: 'divider' },
+                  {
                     key: 'logout',
                     icon: <LogoutOutlined />,
                     label: '退出登录',
@@ -245,6 +255,7 @@ export function MainLayout() {
                 )}
               </Space>
             </Dropdown>
+            <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
           </Space>
         </Header>
         {/* 主内容区：唯一滚动容器 */}

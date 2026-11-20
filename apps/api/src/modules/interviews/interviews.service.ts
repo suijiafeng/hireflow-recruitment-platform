@@ -8,7 +8,17 @@ import {
 import { ACTIVITY_ACTIONS, AI_DRAFT_MARKER, EVALUATION_CONCLUSION_LABEL, PERMISSIONS, RoleCode } from '@hireflow/shared';
 import { departmentScopeOf, inDepartmentScope, isAssignedScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
-import { candidateActor, CN_TZ_OFFSET_MS, formatCnDateTime, newPortalToken } from '../../common/portal';
+import {
+  assertPortalLive,
+  candidateActor,
+  CN_TZ_OFFSET_MS,
+  formatCnDateTime,
+  isPortalLive,
+  newPortalToken,
+  PORTAL_TTL,
+  portalExpiry,
+  portalLinkInvalid,
+} from '../../common/portal';
 import { Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { AiService } from '../ai/ai.service';
@@ -537,8 +547,11 @@ export class InterviewsService {
     });
   }
 
-  /** 生成候选人自助选时链接（未定时间的面试；重发复用同一令牌） */
-  async selfScheduleLink(interviewId: string, user: JwtUser) {
+  /**
+   * 生成候选人自助选时链接（未定时间的面试）。
+   * 有效期内重发复用同一令牌并顺延 7 天；已过期或 rotate=true 换新令牌，旧链接立即失效。
+   */
+  async selfScheduleLink(interviewId: string, user: JwtUser, rotate = false) {
     return this.schedulingTransaction(async (tx) => {
       const interview = await this.lockInterview(tx, interviewId);
       const canSchedule = user.permissions.includes(PERMISSIONS.INTERVIEW_SCHEDULE);
@@ -547,8 +560,12 @@ export class InterviewsService {
       this.assertSchedulable(interview);
       this.assertActive(interview.application);
       if (interview.scheduledAt) throw new BadRequestException('该面试已确定时间，如需改期请联系 HR');
-      const token = interview.portalToken ?? newPortalToken();
-      if (!interview.portalToken) await tx.interview.update({ where: { id: interviewId }, data: { portalToken: token } });
+      const reuse = interview.portalToken && !rotate && isPortalLive(interview.portalExpiresAt);
+      const token = reuse ? interview.portalToken! : newPortalToken();
+      await tx.interview.update({
+        where: { id: interviewId },
+        data: { portalToken: token, portalExpiresAt: portalExpiry(PORTAL_TTL.INTERVIEW_MS) },
+      });
       return { token };
     });
   }
@@ -568,7 +585,8 @@ export class InterviewsService {
         },
       },
     });
-    if (!interview) throw new NotFoundException('链接无效或已失效，请联系 HR');
+    if (!interview) throw portalLinkInvalid();
+    assertPortalLive(interview.portalExpiresAt);
 
     const base = {
       company: 'ART 科技有限公司',
@@ -598,8 +616,9 @@ export class InterviewsService {
    */
   async portalPick(token: string, slotId: string, selectedStartAt?: string) {
     const { interview, start } = await this.schedulingTransaction(async (tx) => {
-      const seed = await tx.interview.findUnique({ where: { portalToken: token }, select: { id: true } });
-      if (!seed) throw new NotFoundException('链接无效或已失效，请联系 HR');
+      const seed = await tx.interview.findUnique({ where: { portalToken: token }, select: { id: true, portalExpiresAt: true } });
+      if (!seed) throw portalLinkInvalid();
+      assertPortalLive(seed.portalExpiresAt);
       const interview = await this.lockInterview(tx, seed.id);
       this.assertSchedulable(interview);
       this.assertActive(interview.application);
@@ -619,7 +638,15 @@ export class InterviewsService {
       const { start, end } = this.window(chosen.startAt, durationMins);
       await this.assertNoConflict(tx, interviewerIds, start, end, interview.id);
       await this.occupySlots(tx, interview.id, interviewerIds, start, end, true);
-      await tx.interview.update({ where: { id: interview.id }, data: { scheduledAt: start, status: 'SCHEDULED' } });
+      // 一次性：选定后不可再选；链接保留到面试开始后 1 天供候选人回看
+      await tx.interview.update({
+        where: { id: interview.id },
+        data: {
+          scheduledAt: start,
+          status: 'SCHEDULED',
+          portalExpiresAt: portalExpiry(PORTAL_TTL.INTERVIEW_AFTER_START_MS, start),
+        },
+      });
       return { interview, start };
     });
     const actor = candidateActor(interview.application.candidate.name);

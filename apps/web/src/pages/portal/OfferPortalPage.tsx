@@ -1,6 +1,6 @@
 import { CheckOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Result, Select, Spin } from 'antd';
+import { Button, Form, Select, Spin } from 'antd';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
@@ -10,6 +10,7 @@ import { PortalShell } from './InterviewPortalPage';
 import { FormModal } from '../../components/FormModal';
 import { pressable } from '../../utils/pressable';
 import { useAppDialogs } from '../../hooks/useAppDialogs';
+import { PortalLinkError, isPortalExpired } from './PortalLinkError';
 
 /**
  * Offer 门户（免登录 H5）：
@@ -38,7 +39,7 @@ export function OfferPortalPage() {
       setDeclineOpen(false);
       message.success(data.decision === 'ACCEPTED' ? '已确认接受，欢迎加入！' : '已提交答复');
     },
-    onError: (error) => message.error(extractErrorMessage(error, '提交失败，请稍后重试')),
+    onError: (error) => isPortalExpired(error) ? void viewQuery.refetch() : message.error(extractErrorMessage(error, '提交失败，请稍后重试')),
   });
 
   const view = viewQuery.data;
@@ -52,16 +53,7 @@ export function OfferPortalPage() {
       </PortalShell>
     );
 
-  if (viewQuery.isError || !view)
-    return (
-      <PortalShell title="链接无效或已失效">
-        <Result
-          status="warning"
-          title="无法打开该链接"
-          subTitle={extractErrorMessage(viewQuery.error, '请联系 HR 获取最新链接')}
-        />
-      </PortalShell>
-    );
+  if (viewQuery.isError || !view) return <PortalLinkError error={viewQuery.error} onRetry={() => void viewQuery.refetch()} />;
 
   if (view.preparing)
     return (

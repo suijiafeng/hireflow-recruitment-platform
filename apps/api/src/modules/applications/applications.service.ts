@@ -9,7 +9,15 @@ import {
 import { ACTIVITY_ACTIONS, PERMISSIONS, RoleCode } from '@hireflow/shared';
 import { departmentScopeOf, isAssignedScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
-import { candidateActor, newPortalToken } from '../../common/portal';
+import {
+  assertPortalLive,
+  candidateActor,
+  isPortalLive,
+  newPortalToken,
+  PORTAL_TTL,
+  portalExpiry,
+  portalLinkInvalid,
+} from '../../common/portal';
 import type { Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { AiService } from '../ai/ai.service';
@@ -486,8 +494,12 @@ export class ApplicationsService {
 
   // ---------- AI 预筛机器人（邀约前自动核实硬性条件） ----------
 
-  /** 生成/复用预筛链接（HR 发给候选人，token 即凭证） */
-  async sendPrescreen(id: string, user: JwtUser) {
+  /**
+   * 生成/复用预筛链接（HR 发给候选人，token 即凭证）。
+   * - 仍在有效期内：复用同一令牌并把有效期顺延 7 天（重发）；
+   * - 已过期或 rotate=true：换新令牌，旧链接立即失效。
+   */
+  async sendPrescreen(id: string, user: JwtUser, rotate = false) {
     const application = await this.prisma.application.findUnique({
       where: { id },
       include: { candidate: { select: { name: true } }, job: { select: { title: true } } },
@@ -495,14 +507,23 @@ export class ApplicationsService {
     if (!application) throw new NotFoundException('应聘记录不存在');
     await this.assertJobDepartmentScope(application.jobId, user);
     if (application.status !== 'ACTIVE') throw new BadRequestException('该应聘已不在流程中');
+    if (application.prescreen) throw new BadRequestException('候选人已提交过预筛信息，无需再发链接');
 
-    let token = application.prescreenToken;
-    if (!token) {
-      token = newPortalToken();
-      await this.prisma.application.update({ where: { id }, data: { prescreenToken: token } });
+    const reuse = application.prescreenToken && !rotate && isPortalLive(application.prescreenExpiresAt);
+    const token = reuse ? application.prescreenToken! : newPortalToken();
+    await this.prisma.application.update({
+      where: { id },
+      data: { prescreenToken: token, prescreenExpiresAt: portalExpiry(PORTAL_TTL.PRESCREEN_MS) },
+    });
+    if (!application.prescreenToken) {
       await this.activityLog.record(user, ACTIVITY_ACTIONS.PRESCREEN_SENT, 'Application', id, {
         candidate: application.candidate.name,
         job: application.job.title,
+      });
+    } else if (!reuse) {
+      await this.activityLog.record(user, ACTIVITY_ACTIONS.PORTAL_LINK_ROTATED, 'Application', id, {
+        candidate: application.candidate.name,
+        portal: 'prescreen',
       });
     }
     return { token };
@@ -514,7 +535,8 @@ export class ApplicationsService {
       where: { prescreenToken: token },
       include: { candidate: { select: { name: true } }, job: { select: { title: true } } },
     });
-    if (!application) throw new NotFoundException('链接无效或已失效，请联系 HR');
+    if (!application) throw portalLinkInvalid();
+    assertPortalLive(application.prescreenExpiresAt);
     return {
       company: 'ART 科技有限公司',
       candidateName: application.candidate.name,
@@ -538,7 +560,8 @@ export class ApplicationsService {
       where: { prescreenToken: token },
       include: { candidate: { select: { id: true, name: true } }, job: { select: { id: true, title: true, departmentId: true } } },
     });
-    if (!application) throw new NotFoundException('链接无效或已失效，请联系 HR');
+    if (!application) throw portalLinkInvalid();
+    assertPortalLive(application.prescreenExpiresAt);
     if (application.status !== 'ACTIVE') throw new BadRequestException('该应聘已不在流程中，预筛链接已失效');
     if (application.prescreen) throw new BadRequestException('预筛信息已提交过，如需更正请联系 HR');
 
@@ -567,9 +590,13 @@ export class ApplicationsService {
       flags,
       submittedAt: new Date().toISOString(),
     };
+    // 一次性：提交后不可再改，链接只再保留 3 天用于回看「已提交」
     await this.prisma.application.update({
       where: { id: application.id },
-      data: { prescreen: prescreen as unknown as Prisma.InputJsonValue },
+      data: {
+        prescreen: prescreen as unknown as Prisma.InputJsonValue,
+        prescreenExpiresAt: portalExpiry(PORTAL_TTL.PRESCREEN_AFTER_SUBMIT_MS),
+      },
     });
     const actor = candidateActor(application.candidate.name);
     await this.activityLog.record(actor, ACTIVITY_ACTIONS.PRESCREEN_SUBMITTED, 'Application', application.id, {

@@ -78,7 +78,7 @@ function DetailRail({ id }: { id: string | null }) {
       const url = `${window.location.origin}/portal/onboarding/${token}`;
       try {
         await navigator.clipboard.writeText(url);
-        message.success(rotate ? '已重新生成并复制新链接，旧链接已失效' : '新员工链接已复制，请通过邮件/IM 发送');
+        message.success(rotate ? '已重新生成并复制新链接，旧链接已失效' : '新员工链接已复制（60 天内有效），请通过邮件/IM 发送');
       } catch {
         modal.info({
           title: '新员工资料填报链接',

@@ -717,7 +717,7 @@ export function PipelinePage() {
       const url = `${window.location.origin}/portal/prescreen/${token}`;
       try {
         await navigator.clipboard.writeText(url);
-        message.success('预筛链接已复制，请发送给候选人（薪资/到岗/出差三问）');
+        message.success('预筛链接已复制（7 天内有效），请发送给候选人（薪资/到岗/出差三问）');
       } catch {
         modal.info({
           title: '候选人预筛链接',

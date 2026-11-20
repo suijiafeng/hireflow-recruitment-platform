@@ -110,6 +110,7 @@ describe('面试排期 HTTP / 数据库回归', () => {
   });
   const interview = (id = 'i1', ids = ['u1'], applicationId = 'a1') => prisma.interview.create({
     data: { id, applicationId, round: 1, durationMins: 60, portalToken: id,
+      portalExpiresAt: new Date(Date.now() + 7 * 86_400_000),
       interviewers: { create: ids.map((userId) => ({ userId })) } },
   });
   const slot = (id: string, userId: string, start: number, end: number, bookedBy?: string) =>
@@ -160,6 +161,39 @@ describe('面试排期 HTTP / 数据库回归', () => {
     expect((await pick('i1', 't1')).status).toBe(409);
     expect(await bookings()).toEqual(before);
     expect((await prisma.interview.findUniqueOrThrow({ where: { id: 'i1' } })).scheduledAt).toBeNull();
+  });
+
+  it('选时链接过期后返回 410（PORTAL_EXPIRED），不能再选；不存在的令牌是 404', async () => {
+    await interview();
+    await slot('t1', 'u1', 2, 4);
+    await prisma.interview.update({ where: { id: 'i1' }, data: { portalExpiresAt: new Date(Date.now() - 1000) } });
+    const res = await fetch(`${base}/portal/interviews/i1`);
+    expect(res.status).toBe(410);
+    expect((await res.json()).code).toBe('PORTAL_EXPIRED');
+    expect((await pick('i1', 't1')).status).toBe(410);
+    expect((await bookings())[0].bookedBy).toBeNull();
+    const missing = await fetch(`${base}/portal/interviews/nope`);
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).code).toBe('PORTAL_INVALID');
+  });
+
+  it('选定时间后链接只保留到面试开始后 1 天；重新生成链接后旧令牌立即失效', async () => {
+    await interview();
+    await slot('t1', 'u1', 2, 4);
+    expect((await pick('i1', 't1')).status).toBe(201);
+    const picked = await prisma.interview.findUniqueOrThrow({ where: { id: 'i1' } });
+    expect(picked.portalExpiresAt).toEqual(new Date(at(2).getTime() + 86_400_000));
+
+    await interview('i2', ['u1'], 'a2');
+    const rotated = await post('/interviews/i2/self-schedule-link', { rotate: true });
+    expect(rotated.status).toBe(201);
+    const { token } = await rotated.json();
+    expect(token).not.toBe('i2');
+    expect((await fetch(`${base}/portal/interviews/i2`)).status).toBe(404);
+    expect((await fetch(`${base}/portal/interviews/${token}`)).status).toBe(200);
+    // 有效期内重发：复用同一令牌并顺延有效期
+    const again = await (await post('/interviews/i2/self-schedule-link')).json();
+    expect(again.token).toBe(token);
   });
 
   it('部分重叠返回真实交集，并在交集起点为全员占档', async () => {

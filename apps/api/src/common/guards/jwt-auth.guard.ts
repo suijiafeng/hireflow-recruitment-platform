@@ -28,9 +28,9 @@ export class JwtAuthGuard implements CanActivate {
     const token = this.extractToken(request);
     if (!token) throw new UnauthorizedException('未登录或令牌缺失');
 
-    let payload: JwtUser;
+    let payload: JwtUser & { tv?: number };
     try {
-      payload = await this.jwtService.verifyAsync<JwtUser>(token, {
+      payload = await this.jwtService.verifyAsync<JwtUser & { tv?: number }>(token, {
         secret: this.config.getOrThrow<string>('JWT_SECRET'),
       });
     } catch {
@@ -41,6 +41,11 @@ export class JwtAuthGuard implements CanActivate {
     const loaded = await loadAccess(this.prisma, { id: payload.sub });
     if (!loaded || loaded.user.status !== 'ACTIVE') {
       throw new UnauthorizedException('账号已停用或不存在，请联系管理员');
+    }
+    // 吊销：改密 / 重置密码 / 停用 / 退出所有设备都会让 tokenVersion +1，之前签发的令牌一律作废。
+    // 上线前签发的旧令牌没有 tv，按 0 处理：账号从未改过密码时仍有效，改过即失效
+    if ((payload.tv ?? 0) !== loaded.user.tokenVersion) {
+      throw new UnauthorizedException('登录已失效（密码已修改或已在其他地方退出），请重新登录');
     }
     (request as Request & { user: unknown }).user = loaded.access;
     return true;
