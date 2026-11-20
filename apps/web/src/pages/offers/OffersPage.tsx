@@ -219,7 +219,7 @@ export function OffersPage() {
   }
 
   /** 列宽合计，低于此宽度出现横向滚动而不是把列挤扁 */
-  const OFFER_TABLE_X = 944;
+  const OFFER_TABLE_X = 980;
   /** 首个非空分组才画表头，其余组直接接在下面，避免整页都是表头 */
   const firstGroupKey = GROUPS.find((g) => visible.some((o) => groupKey(o) === g.key))?.key;
 
@@ -298,7 +298,7 @@ export function OffersPage() {
     {
       title: '操作',
       key: 'action',
-      width: 132,
+      width: 168,
       align: 'right',
       fixed: 'right',
       render: (_, o) => actionCell(o),

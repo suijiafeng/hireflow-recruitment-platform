@@ -3029,6 +3029,12 @@
 .hf-empty-inline { padding: 8px 12px; font-size: var(--fs-sm); color: rgba(26, 26, 26, 0.45); text-align: center; }
 
 /* 侧栏一项 = 一组页签（看板 / 职位 / 面试；Offer / 入职；概览 / 趋势） */
-.section-tabs { margin: -8px 0 12px; }
+.section-tabs { flex-shrink: 0; padding: 0 20px; background: #fff; border-bottom: 1px solid #eeeff1; }
 .section-tabs .ant-tabs-nav { margin-bottom: 0; }
+.section-tabs .ant-tabs-nav::before { border-bottom: none; }
+.section-tabs .ant-tabs-tab { padding: 10px 0; }
 .kanban-round { display: inline-block; margin-top: 6px; }
+/* 有页签条时，页面在剩余高度里各自滚动 */
+.layout-content { display: flex; flex-direction: column; }
+.layout-content > * { width: 100%; }
+.layout-content > :not(.section-tabs) { flex: 1 1 auto; min-height: 0; }
