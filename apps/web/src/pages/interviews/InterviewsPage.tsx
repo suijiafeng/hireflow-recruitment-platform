@@ -9,7 +9,7 @@ import { interviewsApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import type { Interview, InterviewerSlot } from '../../api/types';
 import { CandidateDetailDrawer } from '../../components/CandidateDetailDrawer';
-import { useDrawerParam, useUrlState } from '../../hooks/useUrlState';
+import { useDrawerParam, useUrlParams, useUrlState } from '../../hooks/useUrlState';
 import { EvaluationModal } from '../../components/EvaluationModal';
 import { RowActions } from '../../components/RowActions';
 import { SetInterviewTimeModal } from '../../components/SetInterviewTimeModal';
@@ -315,6 +315,14 @@ export function InterviewsPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const [evaluateFor, setEvaluateFor] = useState<string | null>(null);
+  // ?evaluate=<面试 id>：从 Copilot「打开面评表单」跳来，直接打开该场面评（草稿已写入本机）
+  const [urlParams, updateUrl] = useUrlParams();
+  const evaluateParam = urlParams.get('evaluate');
+  useEffect(() => {
+    if (!evaluateParam) return;
+    setEvaluateFor(evaluateParam);
+    updateUrl({ evaluate: null });
+  }, [evaluateParam, updateUrl]);
   // 打开的候选人与筛选标签放在网址里：后退关抽屉、刷新不丢筛选
   const [detailId, openDetail, closeDetail] = useDrawerParam('candidate');
   const [scheduleFor, setScheduleFor] = useState<Interview | null>(null);
