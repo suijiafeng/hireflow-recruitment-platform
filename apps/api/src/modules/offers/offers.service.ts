@@ -14,7 +14,16 @@ import {
 } from '@hireflow/shared';
 import { departmentScopeOf, inDepartmentScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
-import { addBusinessDays, candidateActor, CN_TZ_OFFSET_MS, newPortalToken } from '../../common/portal';
+import {
+  addBusinessDays,
+  assertPortalLive,
+  candidateActor,
+  CN_TZ_OFFSET_MS,
+  newPortalToken,
+  PORTAL_TTL,
+  portalExpiry,
+  portalLinkInvalid,
+} from '../../common/portal';
 import type { Offer, Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { AiService } from '../ai/ai.service';
@@ -119,6 +128,7 @@ export class OffersService {
             expiresAt: null,
             extendedOnce: false,
             portalToken: null, // 旧链接作废：候选人不能用它看到新方案
+            portalExpiresAt: null,
             respondedAt: null,
             decision: null,
             decisionReason: null,
@@ -245,6 +255,7 @@ export class OffersService {
         sentAt: new Date(),
         expiresAt,
         portalToken: offer.portalToken ?? newPortalToken(),
+        portalExpiresAt: portalExpiry(PORTAL_TTL.OFFER_AFTER_DEADLINE_MS, expiresAt),
       },
     });
     if (result.count === 0) throw new ConflictException('该 Offer 刚被他人处理，请刷新');
@@ -269,7 +280,12 @@ export class OffersService {
     const expiresAt = addBusinessDays(new Date(), OFFER_VALID_BUSINESS_DAYS);
     const updated = await this.prisma.offer.update({
       where: { id },
-      data: { approvalStatus: 'SENT', expiresAt, extendedOnce: true },
+      data: {
+        approvalStatus: 'SENT',
+        expiresAt,
+        extendedOnce: true,
+        portalExpiresAt: portalExpiry(PORTAL_TTL.OFFER_AFTER_DEADLINE_MS, expiresAt),
+      },
       include: OFFER_INCLUDE,
     });
     await this.activityLog.record(user, ACTIVITY_ACTIONS.OFFER_EXTENDED, 'Application', offer.applicationId, {
@@ -290,12 +306,14 @@ export class OffersService {
       throw new BadRequestException('仅已发送的 Offer 有候选人链接');
     }
     if (!offer.portalToken || rotate) {
+      const expiresAt = offer.expiresAt ?? addBusinessDays(new Date(), OFFER_VALID_BUSINESS_DAYS);
+      // 门户硬过期：已答复的从现在起留 14 天；未答复的到答复截止后 7 天（且至少从现在起 7 天）
+      const portalExpiresAt = offer.decision
+        ? portalExpiry(PORTAL_TTL.OFFER_AFTER_DECISION_MS)
+        : portalExpiry(PORTAL_TTL.OFFER_AFTER_DEADLINE_MS, new Date(Math.max(expiresAt.getTime(), Date.now())));
       offer = await this.prisma.offer.update({
         where: { id },
-        data: {
-          portalToken: newPortalToken(),
-          expiresAt: offer.expiresAt ?? addBusinessDays(new Date(), OFFER_VALID_BUSINESS_DAYS),
-        },
+        data: { portalToken: newPortalToken(), expiresAt, portalExpiresAt },
         include: OFFER_INCLUDE,
       });
     }
@@ -322,7 +340,8 @@ export class OffersService {
       where: { portalToken: token },
       include: OFFER_INCLUDE,
     });
-    if (!offer) throw new NotFoundException('链接无效或已失效，请联系 HR');
+    if (!offer) throw portalLinkInvalid();
+    assertPortalLive(offer.portalExpiresAt);
     offer = await this.expireIfDue(offer);
 
     const readable = offer.approvalStatus === 'SENT' || offer.approvalStatus === 'EXPIRED';
@@ -364,9 +383,10 @@ export class OffersService {
   async portalRespond(token: string, dto: RespondDto) {
     const offer = await this.prisma.offer.findUnique({
       where: { portalToken: token },
-      select: { id: true, application: { select: { candidate: { select: { name: true } } } } },
+      select: { id: true, portalExpiresAt: true, application: { select: { candidate: { select: { name: true } } } } },
     });
-    if (!offer) throw new NotFoundException('链接无效或已失效，请联系 HR');
+    if (!offer) throw portalLinkInvalid();
+    assertPortalLive(offer.portalExpiresAt);
     const actor = candidateActor(offer.application.candidate.name);
     await this.applyDecision(offer.id, dto.decision, dto.reason, actor);
     return this.portalView(token);
@@ -403,6 +423,8 @@ export class OffersService {
         decision,
         respondedAt: new Date(),
         decisionReason: decision === 'DECLINED' ? reason : null,
+        // 一次性：答复后链接只保留 14 天（接受者从这里进入入职门户）
+        portalExpiresAt: offer.portalToken ? portalExpiry(PORTAL_TTL.OFFER_AFTER_DECISION_MS) : null,
       },
     });
     if (result.count === 0) throw new ConflictException('该 Offer 刚被答复过，请刷新查看');

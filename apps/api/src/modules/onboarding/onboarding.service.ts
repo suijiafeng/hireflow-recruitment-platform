@@ -15,7 +15,17 @@ import {
 } from '@hireflow/shared';
 import { departmentScopeOf } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
-import { candidateActor, CN_TZ_OFFSET_MS, newPortalToken } from '../../common/portal';
+import {
+  assertPortalLive,
+  candidateActor,
+  CN_TZ_OFFSET_MS,
+  isPortalLive,
+  newPortalToken,
+  PORTAL_TTL,
+  portalExpiry,
+  portalLinkInvalid,
+  PortalLinkExpiredException,
+} from '../../common/portal';
 import type { Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { ApplicationsService } from '../applications/applications.service';
@@ -96,6 +106,7 @@ export class OnboardingService {
         checklist: checklist as unknown as Prisma.InputJsonValue,
         documents: [] as unknown as Prisma.InputJsonValue,
         portalToken: newPortalToken(), // 新员工免登录 H5 资料收集入口
+        portalExpiresAt: portalExpiry(PORTAL_TTL.ONBOARDING_MS),
       },
       include: ONBOARDING_INCLUDE,
     });
@@ -572,16 +583,26 @@ export class OnboardingService {
   async ensurePortalToken(id: string, user: JwtUser, rotate = false): Promise<string> {
     const onboarding = await this.prisma.onboarding.findUnique({
       where: { id },
-      select: { id: true, portalToken: true, status: true, applicationId: true, application: { select: { candidate: { select: { name: true } } } } },
+      select: {
+        id: true,
+        portalToken: true,
+        portalExpiresAt: true,
+        status: true,
+        applicationId: true,
+        application: { select: { candidate: { select: { name: true } } } },
+      },
     });
     if (!onboarding) throw new NotFoundException('入职单不存在');
     if (onboarding.status === 'COMPLETED') {
       throw new BadRequestException('入职已闭环，门户链接不再发放');
     }
-    if (onboarding.portalToken && !rotate) return onboarding.portalToken;
-    // rotate：重新生成令牌，旧链接立即失效（误发、疑似泄露时用）
+    if (onboarding.portalToken && !rotate && isPortalLive(onboarding.portalExpiresAt)) return onboarding.portalToken;
+    // rotate：重新生成令牌，旧链接立即失效（误发、疑似泄露时用）；已过期的链接再次获取时也换新
     const token = newPortalToken();
-    await this.prisma.onboarding.update({ where: { id }, data: { portalToken: token } });
+    await this.prisma.onboarding.update({
+      where: { id },
+      data: { portalToken: token, portalExpiresAt: portalExpiry(PORTAL_TTL.ONBOARDING_MS) },
+    });
     if (rotate) {
       await this.activityLog.record(user, ACTIVITY_ACTIONS.PORTAL_LINK_ROTATED, 'Application', onboarding.applicationId, {
         candidate: onboarding.application.candidate.name,
@@ -595,9 +616,9 @@ export class OnboardingService {
   async portalTokenOf(applicationId: string): Promise<string | null> {
     const onboarding = await this.prisma.onboarding.findUnique({
       where: { applicationId },
-      select: { portalToken: true },
+      select: { portalToken: true, portalExpiresAt: true },
     });
-    return onboarding?.portalToken ?? null;
+    return onboarding?.portalToken && isPortalLive(onboarding.portalExpiresAt) ? onboarding.portalToken : null;
   }
 
   /** 新员工视角的入职单（不暴露内部 id 之外的敏感信息；材料仅回显已识别字段） */
@@ -658,14 +679,15 @@ export class OnboardingService {
       where: { portalToken: token },
       include: ONBOARDING_INCLUDE,
     });
-    if (!onboarding) throw new NotFoundException('链接无效或已失效，请联系 HR');
+    if (!onboarding) throw portalLinkInvalid();
+    assertPortalLive(onboarding.portalExpiresAt);
     // 门户视图含未脱敏的薪资与证件信息：闭环后只保留短暂宽限期（让刚签完合同的人看到完成页），过期即失效。
     // 闭环后入职单不再允许修改，updatedAt 即闭环时间
     if (
       onboarding.status === 'COMPLETED' &&
       Date.now() - onboarding.updatedAt.getTime() > PORTAL_GRACE_AFTER_COMPLETION_MS
     ) {
-      throw new NotFoundException('入职流程已完成，链接已失效。如需合同副本请联系 HR');
+      throw new PortalLinkExpiredException('入职流程已完成，链接已失效。如需合同副本请联系 HR');
     }
     return onboarding;
   }

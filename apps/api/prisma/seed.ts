@@ -772,6 +772,8 @@ async function seedExtendedDemo() {
         decisionReason: o.decisionReason,
         respondedAt: o.decision ? daysAgo(Math.max(o.daysAgo - 3, 0)) : null,
         portalToken: o.decision ? null : demoPortalToken(), // 随机：演示站公开，可推算的令牌等于开放门户
+        // 门户硬过期：答复截止后再留 7 天（与 PORTAL_TTL.OFFER_AFTER_DEADLINE_MS 一致）
+        portalExpiresAt: o.decision ? null : daysAgo(-((o.expiresInDays ?? 0) + 7), 18),
         createdAt,
         updatedAt: createdAt,
       },
@@ -833,6 +835,7 @@ async function seedExtendedDemo() {
         documents,
         status: ob.status,
         portalToken: demoPortalToken(),
+        portalExpiresAt: daysAgo(-60, 18), // PORTAL_TTL.ONBOARDING_MS
         createdAt,
         updatedAt: createdAt,
       },

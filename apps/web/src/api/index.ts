@@ -57,6 +57,11 @@ export const authApi = {
     http
       .get<Omit<AuthUser, 'roles'> & { roles: Array<{ code: string }> }>('/auth/profile')
       .then((r): AuthUser => ({ ...r.data, roles: r.data.roles.map((role) => role.code) })),
+  /** 修改自己的密码：其他设备上的登录立即失效，返回当前会话的新令牌 */
+  changePassword: (data: { currentPassword: string; newPassword: string }) =>
+    http.post<{ accessToken: string }>('/auth/password', data).then((r) => r.data),
+  /** 退出其他所有设备：返回当前会话的新令牌 */
+  revokeSessions: () => http.post<{ accessToken: string }>('/auth/sessions/revoke').then((r) => r.data),
 };
 
 export const jobsApi = {
@@ -140,8 +145,9 @@ export const applicationsApi = {
   score: (id: string) => http.post<ScoreResult>(`/applications/${id}/score`, undefined, aiRequest).then((r) => r.data),
   compare: (ids: string[]) =>
     http.post<CompareData>('/applications/compare', { ids }, aiRequest).then((r) => r.data),
-  prescreenLink: (id: string) =>
-    http.post<{ token: string }>(`/applications/${id}/prescreen-link`).then((r) => r.data),
+  /** rotate=true 重新生成链接，旧链接立即失效；链接 7 天有效，有效期内重发会顺延 */
+  prescreenLink: (id: string, rotate = false) =>
+    http.post<{ token: string }>(`/applications/${id}/prescreen-link`, { rotate }).then((r) => r.data),
 };
 
 export const resumesApi = {
@@ -311,8 +317,9 @@ export const interviewsApi = {
     interviewId: string,
     data: { scheduledAt: string; durationMins?: number; ignoreConflict?: boolean },
   ) => http.post<Interview>(`/interviews/${interviewId}/schedule`, data).then((r) => r.data),
-  selfScheduleLink: (interviewId: string) =>
-    http.post<{ token: string }>(`/interviews/${interviewId}/self-schedule-link`).then((r) => r.data),
+  /** rotate=true 重新生成链接，旧链接立即失效；链接 7 天有效，有效期内重发会顺延 */
+  selfScheduleLink: (interviewId: string, rotate = false) =>
+    http.post<{ token: string }>(`/interviews/${interviewId}/self-schedule-link`, { rotate }).then((r) => r.data),
   mySlots: () => http.get<InterviewerSlot[]>('/interviewer-slots/mine').then((r) => r.data),
   addSlot: (startAt: string, endAt: string) =>
     http.post<InterviewerSlot>('/interviewer-slots', { startAt, endAt }).then((r) => r.data),
@@ -347,6 +354,9 @@ export const usersApi = {
     http
       .patch<UserItem & { openJobs: Array<{ id: string; title: string }> }>(`/users/${userId}/status`, { status })
       .then((r) => r.data),
+  /** 重置成员密码：temporaryPassword 仅此一次返回；该成员所有已登录会话立即失效 */
+  resetPassword: (userId: string) =>
+    http.post<{ temporaryPassword: string }>(`/users/${userId}/reset-password`).then((r) => r.data),
   /** 邀请内部成员；initialPassword 仅此一次返回，页面须提示管理员立即转交 */
   invite: (data: InviteUserInput) =>
     http.post<{ user: UserItem; initialPassword: string }>('/users', data).then((r) => r.data),

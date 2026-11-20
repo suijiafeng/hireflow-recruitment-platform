@@ -1,3 +1,4 @@
+import { PortalLinkDto } from '../../common/dto/portal-link.dto';
 import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSIONS } from '@hireflow/shared';
@@ -66,8 +67,8 @@ export class InterviewsController {
   @Post(':id/self-schedule-link')
   @RequirePermissions(PERMISSIONS.EVALUATION_READ)
   @ApiOperation({ summary: '生成候选人自助选时链接（未定时间的面试；本场面试官也可发）' })
-  selfScheduleLink(@Param('id') id: string, @CurrentUser() user: JwtUser) {
-    return this.interviewsService.selfScheduleLink(id, user);
+  selfScheduleLink(@Param('id') id: string, @Body() dto: PortalLinkDto, @CurrentUser() user: JwtUser) {
+    return this.interviewsService.selfScheduleLink(id, user, dto?.rotate === true);
   }
 }
 

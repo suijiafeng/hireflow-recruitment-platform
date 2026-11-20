@@ -13,7 +13,7 @@ import {
   DOCUMENT_TYPE_META,
   type ContractSignStatus,
 } from '@hireflow/shared';
-import { Button, Form, Input, Result, Select, Spin, Upload } from 'antd';
+import { Button, Form, Input, Select, Spin, Upload } from 'antd';
 import dayjs from 'dayjs';
 import type { CSSProperties } from 'react';
 import { useEffect, useState } from 'react';
@@ -27,6 +27,7 @@ import { FormModal } from '../../components/FormModal';
 import { pressable } from '../../utils/pressable';
 import { prepareUpload } from '../../utils/prepareUpload';
 import { useAppDialogs } from '../../hooks/useAppDialogs';
+import { PortalLinkError, isPortalExpired } from './PortalLinkError';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -116,7 +117,7 @@ export function OnboardingPortalPage() {
       docForm.resetFields();
       message.success(docFile && !values.rawText ? '照片已提交，HR 将人工核对后确认' : '材料已提交，系统已自动识别关键信息');
     },
-    onError: (error) => message.error(extractErrorMessage(error, '提交失败，请稍后重试')),
+    onError: (error) => isPortalExpired(error) ? void viewQuery.refetch() : message.error(extractErrorMessage(error, '提交失败，请稍后重试')),
   });
 
   const signMutation = useMutation({
@@ -125,7 +126,7 @@ export function OnboardingPortalPage() {
       queryClient.setQueryData(['portal-onboarding', token], data);
       message.success('合同已签署，感谢配合！');
     },
-    onError: (error) => message.error(extractErrorMessage(error, '签署失败，请稍后重试')),
+    onError: (error) => isPortalExpired(error) ? void viewQuery.refetch() : message.error(extractErrorMessage(error, '签署失败，请稍后重试')),
   });
 
   const view = viewQuery.data;
@@ -165,16 +166,7 @@ export function OnboardingPortalPage() {
       </PortalShell>
     );
 
-  if (viewQuery.isError || !view)
-    return (
-      <PortalShell title="链接无效或已失效">
-        <Result
-          status="warning"
-          title="无法打开该链接"
-          subTitle={extractErrorMessage(viewQuery.error, '请联系 HR 获取最新链接')}
-        />
-      </PortalShell>
-    );
+  if (viewQuery.isError || !view) return <PortalLinkError error={viewQuery.error} onRetry={() => void viewQuery.refetch()} />;
 
   const myItems = view.checklist.filter((i) => i.owner === 'NEW_HIRE');
   const companyItems = view.checklist.filter((i) => i.owner !== 'NEW_HIRE');

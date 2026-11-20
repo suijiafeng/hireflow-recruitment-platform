@@ -1,3 +1,4 @@
+import { PortalLinkDto } from '../../common/dto/portal-link.dto';
 import { Body, Controller, Get, HttpCode, Param, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSIONS } from '@hireflow/shared';
@@ -55,8 +56,8 @@ export class ApplicationsController {
   @Post('applications/:id/prescreen-link')
   @RequirePermissions(PERMISSIONS.APPLICATION_MOVE)
   @ApiOperation({ summary: '生成候选人预筛链接（邀约前核实薪资/到岗/出差）' })
-  sendPrescreen(@Param('id') id: string, @CurrentUser() user: JwtUser) {
-    return this.applicationsService.sendPrescreen(id, user);
+  sendPrescreen(@Param('id') id: string, @Body() dto: PortalLinkDto, @CurrentUser() user: JwtUser) {
+    return this.applicationsService.sendPrescreen(id, user, dto?.rotate === true);
   }
 
   // 批量路由必须声明在 :id 参数路由之前（Nest 按声明顺序匹配，否则 "batch" 会被当作 :id）

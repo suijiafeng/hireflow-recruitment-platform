@@ -1,12 +1,13 @@
 import { CheckOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { App, Button, DatePicker, Form, Input, InputNumber, Result, Spin } from 'antd';
+import { App, Button, DatePicker, Form, Input, InputNumber, Spin } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useParams } from 'react-router';
 import { portalApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import { PortalShell } from './InterviewPortalPage';
 import { pressable } from '../../utils/pressable';
+import { PortalLinkError, isPortalExpired } from './PortalLinkError';
 
 /** 单选题：卡片式选项，取代 Radio.Group（移动端点击区更大） */
 function OptionPicker<T extends string | number | boolean>({
@@ -64,7 +65,7 @@ export function PrescreenPortalPage() {
       queryClient.setQueryData(['portal-prescreen', token], data);
       message.success('已提交，感谢您的配合！');
     },
-    onError: (error) => message.error(extractErrorMessage(error, '提交失败，请稍后重试')),
+    onError: (error) => isPortalExpired(error) ? void viewQuery.refetch() : message.error(extractErrorMessage(error, '提交失败，请稍后重试')),
   });
 
   const view = viewQuery.data;
@@ -78,16 +79,7 @@ export function PrescreenPortalPage() {
       </PortalShell>
     );
 
-  if (viewQuery.isError || !view)
-    return (
-      <PortalShell title="链接无效或已失效">
-        <Result
-          status="warning"
-          title="无法打开该链接"
-          subTitle={extractErrorMessage(viewQuery.error, '请联系 HR 获取最新链接')}
-        />
-      </PortalShell>
-    );
+  if (viewQuery.isError || !view) return <PortalLinkError error={viewQuery.error} onRetry={() => void viewQuery.refetch()} />;
 
   if (view.closed && !view.prescreen)
     return (
