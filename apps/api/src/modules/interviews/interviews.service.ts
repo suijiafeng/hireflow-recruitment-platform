@@ -406,6 +406,12 @@ export class InterviewsService {
       notes,
       dimensions: template?.map((t) => t.dimension),
     });
+    // 草稿不落库，但「用过 AI」要在候选人时间轴上看得到（只记结论与轮次，不记面试笔记原文）
+    await this.activityLog.record(user, ACTIVITY_ACTIONS.EVALUATION_DRAFTED, 'Application', interview.applicationId, {
+      round: interview.round,
+      conclusion: data.conclusion,
+      provider: meta.provider,
+    });
     return { ...data, aiMeta: meta };
   }
 

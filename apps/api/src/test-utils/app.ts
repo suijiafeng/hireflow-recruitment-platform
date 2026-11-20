@@ -21,6 +21,8 @@ export interface TestApp {
   /** 以当前登录身份调用 /api/*；auth=false 时匿名（门户） */
   call: (method: string, path: string, body?: unknown, auth?: boolean) => Promise<Res>;
   login: (email?: string, password?: string) => Promise<void>;
+  /** 带当前登录身份的原始请求（multipart 上传、二进制下载） */
+  fetchRaw: (path: string, init?: RequestInit) => Promise<Response>;
   stop: () => Promise<void>;
 }
 
@@ -103,11 +105,14 @@ export async function bootTestApp(): Promise<TestApp> {
     const res = expectOk(await call('POST', '/auth/login', { email, password }, false));
     token = (res.body as { accessToken: string }).accessToken;
   };
+  const fetchRaw = (path: string, init: RequestInit = {}) =>
+    fetch(`${api}${path}`, { ...init, headers: { ...(init.headers ?? {}), authorization: `Bearer ${token}` } });
   return {
     app,
     prisma,
     call,
     login,
+    fetchRaw,
     stop: async () => {
       await app.close();
       await db.stop();
