@@ -1,6 +1,6 @@
 # HireFlow
 
-给招聘团队用的全栈 ATS：职位、候选人、面试、Offer 和入职在同一条流程里。界面上的产品名是 ART 智能招聘。
+给招聘团队用的全栈 ATS：职位、候选人、面试、Offer 和入职在同一条流程里。
 
 <table>
   <tr>
@@ -16,7 +16,7 @@
   <tr>
     <td width="400" valign="top">
       <img src="./docs/screenshots/offers.webp" width="400" alt="录用管理" />
-      <br />录用：审批、发送和候选人答复
+      <br />录用：发送 Offer 和候选人答复
     </td>
     <td width="400" valign="top">
       <img src="./docs/screenshots/dashboard-mobile.webp" width="400" alt="手机宽度的数据大盘" />
@@ -27,13 +27,16 @@
 
 ## 功能
 
-- 职位有草稿、待审批、招聘中、暂停和关闭。每个职位可以改自己的流程阶段。
-- 看板拖动推进阶段。候选人详情在抽屉里，包含简历、面评和时间轴。
-- 面试排期和面评。候选人用免登录链接选时间、答复 Offer、提交入职材料。
-- 权限分两轴：能做什么，以及能看谁的数据（全部、本部门、仅指派、仅本人）。没有 `salary:view` 就看不到薪资。
-- 数据大盘和洞察：漏斗、渠道、面试官和招聘周期。
-- 页头的 **AI Copilot** 侧栏：用自然语言查候选人、看板、面试、Offer 和漏斗，也能起草推进阶段、安排面试、加备注、写面评草稿、淘汰——写操作都要人点确认才执行。
-- AI 网关负责 JD、简历解析、匹配、面评草稿和漏斗诊断。支持 Anthropic 和 OpenAI 兼容接口（DeepSeek、通义千问、本地 vLLM 等），没有模型 key 时走内置规则引擎。
+侧栏只有 5 项：**看板**（含职位、面试页签）、**候选人**、**录用入职**（Offer、入职页签）、**数据**、**设置**。
+
+- 看板固定 4 个系统阶段：筛选 → 面试 → 录用 → 入职，可以改名、可以在中间插入自定义阶段。自动流转按阶段**类型**判断（改名不影响）：安排面试进「面试」，发出 Offer 进「录用」，候选人接受 Offer 进「入职」，HR 确认入职后标记为已入职。面试轮次是卡片上的标签（如「二面 · 待评价 1/2」），不再占一列。
+- 职位状态：草稿、招聘中、暂停、关闭。没有审批流：HR 直接发 Offer。
+- **候选人页**：一条应聘一个免登录链接，HR 复制后发给候选人。候选人在同一页里选面试时间、答复 Offer、填写入职信息、阅读并确认劳动合同，也能问入职问题（按公司制度文档回答并给出处）。
+- 入职只有两件事：入职信息 + 合同确认。两样都齐了，HR 点「确认入职」。
+- 权限分两轴：能做什么，以及能看谁的数据（全部、本部门、仅被指派）。没有 `salary:view` 就看不到薪资。
+- 数据：漏斗、趋势、渠道、面试官和招聘周期。
+- 页头的 **AI Copilot** 侧栏：用自然语言查候选人、看板、面试、Offer；候选人对比、漏斗诊断、制度问答也在这里。能起草推进阶段、安排面试、加备注、写面评草稿、淘汰——写操作都要人点确认才执行。
+- AI 能力：JD 生成、简历解析与匹配评分、面评草稿、人才库唤醒、Copilot。支持 Anthropic 和 OpenAI 兼容接口（DeepSeek、通义千问、本地 vLLM 等），没有模型 key 时走内置规则引擎，界面上标「规则」。
 
 ## 技术栈
 
@@ -78,7 +81,7 @@ flowchart LR
   subgraph API["NestJS · CopilotModule"]
     C["POST /copilot/conversations/:id/messages<br/>SSE：meta / text / tool_start / tool_end / action / done"]
     L["Agent 循环<br/>迭代 · 工具次数 · 超时 · 成本 · 预算上限"]
-    R["读工具<br/>search_candidates · get_candidate · job_pipeline<br/>upcoming_interviews · offer_status · funnel_insights …"]
+    R["读工具<br/>search_candidates · get_candidate · job_pipeline<br/>upcoming_interviews · offer_status · funnel_insights<br/>compare_candidates · funnel_diagnosis · search_policies …"]
     W["写工具（只提议）<br/>move_candidate_stage · schedule_interview<br/>add_candidate_note · draft_evaluation · reject_application"]
     A["POST /copilot/actions/:id/confirm<br/>按此刻权限 + 乐观锁重新执行 · 审计日志"]
   end
@@ -117,7 +120,7 @@ flowchart LR
 
 ## 本地运行
 
-需要 Node.js 20.19 或更高。不用先装 Docker 或 PostgreSQL。
+需要 Node.js 20.19 或更高。不用先装 Docker 或 PostgreSQL：`npm run dev` 用 PGlite 在 5433 端口起一个本地库，文件存在 `apps/api/.storage`。
 
 ```bash
 git clone https://github.com/suijiafeng/hireflow-recruitment-platform.git
@@ -129,24 +132,42 @@ npm run dev
 
 浏览器打开 http://localhost:5173 。API 在 http://localhost:3000/api 。
 
-种子账号的密码都是 `Admin@123456`：
+开发环境会写入演示数据，演示账号密码都是 `Admin@123456`：
 
 | 邮箱 | 角色 |
 | --- | --- |
-| `admin@arthr.local` | 系统管理员 |
-| `hr@arthr.local` | HR |
-| `manager@arthr.local` | 用人经理 |
-| `interviewer@arthr.local` | 面试官 |
-| `it@arthr.local` | IT / 行政 |
+| `admin@hireflow.local` | 系统管理员 |
+| `hr@hireflow.local` | HR |
+| `manager@hireflow.local` | 用人经理 |
+| `interviewer@hireflow.local` | 面试官 |
 
-不启动对象存储时，文件上传不可用，登录和其他页面仍可用。变量说明在 `apps/api/.env.example`。
+想用真实的 PostgreSQL + MinIO：把 `apps/api/.env` 里的 `DATABASE_URL` 换成文件里注释掉的那一行（`hireflow@127.0.0.1:5432`），`STORAGE_DRIVER` 改成 `"s3"`，然后 `npm run dev:docker`（先 `docker compose up -d --wait`，再执行迁移和种子并启动）。已有外部库时直接 `npm run dev:external-db`。
+
+### 种子数据
+
+`npm run db:seed` 分两部分：
+
+- **基础数据**（任何环境都执行）：权限码、内置角色；库里还没有管理员时创建第一个管理员。邮箱取 `ADMIN_EMAIL`（默认 `admin@hireflow.local`），密码取 `ADMIN_PASSWORD`；不给密码就随机生成一个，**只在日志里打印这一次**。
+- **演示数据**：只在非生产环境写入（`SEED_DEMO=0` 可关掉）。`NODE_ENV=production` 时永远不写，即使设了 `SEED_DEMO=1`。
 
 ### 安全相关开关
 
-- **演示账号**：开发环境登录页默认列出上面的账号并预填密码。生产构建默认**不展示、不预填**；公开演示站构建时显式传 `VITE_DEMO_MODE=true`（Docker：`--build-arg VITE_DEMO_MODE=true`）才会列出账号，且仍不预填密码。正式部署请勿使用种子账号。
-- **登录限流**：按「账号 + 来源 IP」渐进退避（5 次失败后 30s 起翻倍，封顶 15 分钟），不会因为别人输错你的密码而把你锁在外面。部署在反向代理后面时务必配置 `TRUST_PROXY`，否则拿不到真实 IP，只能退化为按账号退避（最长 60 秒）。
-- **会话吊销**：修改密码、管理员重置密码、停用账号、「退出其他设备」都会让该账号此前签发的所有令牌立即失效。
-- **候选人 / 新员工门户链接**有硬过期时间（预筛、选时 7 天；Offer 答复截止后 7 天；入职 60 天），过期显示「链接已过期」；HR 可重新生成链接让旧链接立即作废。
+- **演示账号**：开发环境登录页默认列出上面的账号并预填密码。生产构建默认**不展示、不预填**；公开演示站构建时显式传 `VITE_DEMO_MODE=true`（Docker：`--build-arg VITE_DEMO_MODE=true`）才会列出账号，且仍不预填密码。
+- **登录限流**：按「账号 + 来源 IP」渐进退避（5 次失败后 30s 起翻倍，封顶 15 分钟）。部署在反向代理后面时务必配置 `TRUST_PROXY`，否则拿不到真实 IP，只能退化为按账号退避（最长 60 秒）。
+- **会话吊销**：修改密码、管理员重置密码、停用账号、右上角菜单「退出其他设备」都会让该账号此前签发的令牌立即失效。
+- **候选人页链接**有硬过期时间（默认 14 天；Offer 答复截止后再留 7 天；接受后 60 天；入职完成后 7 天），过期显示「链接已过期」；HR 可重新生成链接让旧链接立即作废。
+- **响应头**：API（helmet）和 nginx 都带 CSP、`X-Content-Type-Options`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`；错误响应统一为 `{ statusCode, code, message, requestId }`，校验信息是中文，每个请求带 `X-Request-Id` 并写进访问日志。
+
+## 部署
+
+仓库自带两个镜像：`Dockerfile.api`（NestJS，以 `node` 用户运行）和 `Dockerfile`（nginx 托管前端并反代 `/api`）。`render.yaml` 是 Render Blueprint，也可以照着它在任意容器平台上部署。
+
+1. 准备 PostgreSQL，把连接串填进 API 的 `DATABASE_URL`；生成足够长的 `JWT_SECRET`。
+2. 设置 `ADMIN_EMAIL`、`ADMIN_PASSWORD`（不设密码会随机生成并打印一次）、`COMPANY_NAME`。
+3. 文件存储用 S3 兼容服务（`STORAGE_DRIVER=s3` + `S3_*`）；容器本地盘随实例重建丢失，只适合试用。
+4. API 容器启动时按顺序执行：`prisma migrate deploy`（数据库没就绪会重试，最终失败则容器退出、部署失败）→ 基础种子 → 启动应用。迁移失败不会带着旧表结构起服务。
+5. 健康检查：`GET /api/health` 只看进程是否存活；`GET /api/ready` 会查一次数据库，库不可用时返回 503，适合做就绪探针和负载均衡摘流。
+6. 前端容器设置 `API_ORIGIN` 指向 API。
 
 ## 目录
 

@@ -10,8 +10,9 @@
 #
 # 首次部署前手动在 Render 环境变量里补上（标了 sync: false 的项，控制台里填，不进 git）：
 #   hireflow-api:  DATABASE_URL（外部 Postgres 连接串，格式见下方注释）
+#                  ADMIN_EMAIL / ADMIN_PASSWORD（首个管理员；不填密码会随机生成并只在部署日志里打印一次）
 #                  ANTHROPIC_API_KEY（留空则自动降级 mock 引擎，全链路仍可用）
-#                  S3_ENDPOINT / S3_ACCESS_KEY / S3_SECRET_KEY / S3_BUCKET（不填则文件上传功能不可用，其余功能不受影响）
+#                  S3_ENDPOINT / S3_ACCESS_KEY / S3_SECRET_KEY / S3_BUCKET（文件存储；不填则落实例本地盘，重建即丢失）
 #
 # hireflow-web 反代 /api 到 hireflow-api 依赖 Render 同区域私有网络（同 region 的
 # Web Service 之间可用 `http://<service-name>:<port>` 互通）。若你的账号/区域没有私网，
@@ -26,6 +27,7 @@ services:
     dockerContext: .
     plan: free
     region: singapore
+    # /api/health 只看进程存活；/api/ready 会查库（库不可用返回 503），外部监控可用它
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
@@ -42,6 +44,14 @@ services:
         sync: false
       - key: JWT_SECRET
         generateValue: true
+      # 首个管理员（库里已有管理员时不再创建）。生产环境不会写演示数据
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: COMPANY_NAME
+        value: HireFlow 科技有限公司
+      # 文件存储：填了 S3_ENDPOINT 自动用 S3；不填则落实例本地盘（Render 实例磁盘不持久，重建后文件丢失，只适合试用）
       - key: JWT_EXPIRES_IN
         value: 12h
       - key: AI_PROVIDER
