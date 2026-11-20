@@ -16,7 +16,7 @@ import {
 import type { DragEndEvent } from '@dnd-kit/core';
 import { PERMISSIONS } from '@hireflow/shared';
 import { useQueryClient } from '@tanstack/react-query';
-import { Alert, App, Button, Input, Space, Spin, Typography } from 'antd';
+import { Alert, Button, Input, Space, Spin, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { jobsApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
@@ -24,6 +24,7 @@ import type { Job, JobStage, JobStageInput } from '../../api/types';
 import { FormModal } from '../../components/FormModal';
 import { useAuthStore } from '../../stores/auth';
 import './JobStagesModal.css';
+import { useAppDialogs } from '../../hooks/useAppDialogs';
 
 interface DraftStage extends JobStageInput {
   key: string;
@@ -131,7 +132,7 @@ function StageRow({
 
 /** 草稿只属于本次弹窗；任何不确定的保存结果都必须重新读取，绝不自动重放 PUT。 */
 export function JobStagesModal({ job, onClose }: { job: Job; onClose: () => void }) {
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const queryClient = useQueryClient();
   const canManage = useAuthStore(
     (state) => state.user?.permissions.includes(PERMISSIONS.JOB_STAGES_MANAGE) ?? false,

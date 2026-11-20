@@ -1,7 +1,7 @@
 import { PlusOutlined, TeamOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PERMISSIONS } from '@hireflow/shared';
-import { App, Button, Form, Input, Select, Spin, Table, Tag } from 'antd';
+import { Button, Form, Input, Select, Spin, Table, Tag } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import type { CSSProperties } from 'react';
@@ -16,6 +16,7 @@ import { useAuthStore } from '../../stores/auth';
 import { FormModal } from '../../components/FormModal';
 import { RuleScoreMark } from '../../components/ui';
 import { useDrawerParam, useUrlParams } from '../../hooks/useUrlState';
+import { useAppDialogs } from '../../hooks/useAppDialogs';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -37,7 +38,7 @@ function stageTagClass(stage: string) {
 }
 
 export function CandidatesPage() {
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
 

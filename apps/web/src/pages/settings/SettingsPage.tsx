@@ -1,7 +1,7 @@
-import { PlusOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, SafetyCertificateOutlined, WarningOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DEFAULT_ROLE_PERMISSIONS, PERMISSIONS, RoleCode } from '@hireflow/shared';
-import { App, Button, Form, Input, Modal, Popconfirm, Select, Spin, Table, Typography } from 'antd';
+import { App, Button, Form, Input, Modal, Popconfirm, Select, Spin, Table, Tooltip, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import type { CSSProperties } from 'react';
@@ -25,6 +25,11 @@ import { useUrlState } from '../../hooks/useUrlState';
 import { pressable } from '../../utils/pressable';
 import { departmentOptions } from '../../utils/departments';
 import { AiUsageSection } from './AiUsageSection';
+import { EmptyState } from '../../components/EmptyState';
+import { useAppDialogs } from '../../hooks/useAppDialogs';
+
+/** 「最近权限变更」只看这些动作前缀 */
+const PERM_CHANGE_ACTIONS = ['role.', 'user.', 'department.'];
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -63,7 +68,11 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
 
   const rolesQuery = useQuery({ queryKey: ['roles'], queryFn: rbacApi.roles });
   const permissionsQuery = useQuery({ queryKey: ['permissions'], queryFn: rbacApi.permissions });
-  const auditQuery = useQuery({ queryKey: ['audit', 1], queryFn: () => auditApi.recent(1) });
+  // 只取权限相关动作：之前取全站最近 20 条再在前端筛，最近都是候选人 / AI 操作时这块就一片空白
+  const auditQuery = useQuery({
+    queryKey: ['audit', 'perm-changes'],
+    queryFn: () => auditApi.recent(1, 12, PERM_CHANGE_ACTIONS),
+  });
 
   const roles = rolesQuery.data ?? [];
   const role = roles.find((r) => r.id === selectedId) ?? null;
@@ -171,7 +180,9 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
       render: (_, r) =>
         // 门户角色没有后台权限，显示 0 项会被误读成「权限被清空了」
         r.permissions.length === 0 ? (
-          <span className="hf-faint">门户角色 · 无后台权限</span>
+          <Tooltip title="门户角色：候选人 / 新员工通过免登录链接使用，没有后台权限">
+            <span className="hf-faint u-nowrap">仅门户</span>
+          </Tooltip>
         ) : (
           <span className="hf-progress-num">{r.permissions.length} 项</span>
         ),
@@ -192,6 +203,10 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
       },
     },
   ];
+
+  const recentPermChanges = (auditQuery.data?.items ?? [])
+    .filter((a) => PERM_CHANGE_ACTIONS.some((p) => a.action.startsWith(p)))
+    .slice(0, 12);
 
   return (
     <>
@@ -236,13 +251,21 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
               </span>
             </div>
             <div className="hf-tbody">
-              {(auditQuery.data?.items ?? [])
-                .filter(
-                  (a) =>
-                    a.action.startsWith('role.') || a.action.startsWith('user.') || a.action.startsWith('department.'),
-                )
-                .slice(0, 12)
-                .map((a) => (
+              {recentPermChanges.length === 0 ? (
+                <EmptyState
+                  size="sm"
+                  minHeight={140}
+                  icon={<SafetyCertificateOutlined />}
+                  title="最近没有权限变更"
+                  description="角色、成员、部门的调整会记录在这里；更早的记录在审计日志里。"
+                  action={
+                    <Button size="small" onClick={onGoAudit}>
+                      查看审计日志
+                    </Button>
+                  }
+                />
+              ) : (
+                recentPermChanges.map((a) => (
                   <div key={a.id} className="hf-tr hf-tr--dense">
                     <span className="hf-td w-150 hf-muted hf-td--num">
                       {dayjs(a.createdAt).format('MM-DD HH:mm:ss')}
@@ -253,7 +276,8 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
                       {a.payload ? JSON.stringify(a.payload) : '—'}
                     </span>
                   </div>
-                ))}
+                ))
+              )}
         </div>
       </div>
 
@@ -389,7 +413,7 @@ function RolesSection({ onGoAudit }: { onGoAudit: () => void }) {
 
 /* ============================================================ 成员管理 */
 function MembersSection() {
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<UserItem | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
@@ -525,6 +549,7 @@ function MembersSection() {
                 description="停用后立即无法登录，已登录的会话也会失效；数据与历史留痕保留。"
                 okText="停用"
                 okButtonProps={{ danger: true }}
+                cancelText="取消"
                 onConfirm={() => statusMutation.mutate({ id: u.id, status: 'DISABLED' })}
               >
                 <span className="hf-link hf-link--danger">停用</span>
@@ -817,7 +842,14 @@ function DepartmentsSection() {
               改名
             </span>
             {empty ? (
-              <Popconfirm title={`删除部门「${d.name}」？`} onConfirm={() => removeMutation.mutate(d.id)}>
+              <Popconfirm
+                title={`删除部门「${d.name}」？`}
+                description="删除后不可恢复。"
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={() => removeMutation.mutate(d.id)}
+              >
                 <span className="hf-link hf-link--danger">删除</span>
               </Popconfirm>
             ) : (
@@ -981,7 +1013,14 @@ function CompanyDocsSection() {
           >
             编辑
           </span>
-          <Popconfirm title={`删除文档「${d.title}」？`} onConfirm={() => removeMutation.mutate(d.id)}>
+          <Popconfirm
+            title={`删除文档「${d.title}」？`}
+            description="删除后入职问答不再引用这篇文档。"
+            okText="删除"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+            onConfirm={() => removeMutation.mutate(d.id)}
+          >
             <span className="hf-link hf-link--danger">删除</span>
           </Popconfirm>
         </span>

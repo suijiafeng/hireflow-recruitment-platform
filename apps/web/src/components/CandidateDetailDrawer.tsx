@@ -30,7 +30,8 @@ import { useAuthStore } from '../stores/auth';
 import { EvaluationModal } from './EvaluationModal';
 import { ScheduleInterviewModal } from './ScheduleInterviewModal';
 import { FormModal } from './FormModal';
-import { RuleScoreMark } from './ui';
+import { AiSourceBadge, RuleScoreMark } from './ui';
+import { EmptyState } from './EmptyState';
 import { prepareUpload } from '../utils/prepareUpload';
 import { pressable } from '../utils/pressable';
 import { resumeParseState } from '../utils/resumeParse';
@@ -213,6 +214,7 @@ function ApplicationBlock({
               title="重新激活该候选人？"
               description="该应聘记录将回到首个阶段重新开始；历史面评、匹配分与淘汰原因会保留在同一条时间轴上。"
               okText="确认激活"
+              cancelText="取消"
               onConfirm={() => onReactivate(application.job.id)}
             >
               <span className="hf-link">{reactivating ? '激活中…' : '重新激活'}</span>
@@ -244,6 +246,15 @@ function ApplicationBlock({
       </div>
 
       {/* AI 依据：命中 / 缺失两栏平铺，取代 Popover 里的一堆 Tag */}
+      {report && (
+        <div className="hf-match-source">
+          <span className="hf-caption">匹配依据</span>
+          <AiSourceBadge
+            meta={report.aiMeta ?? (application.matchSource === 'rule' ? { provider: 'mock', degraded: true } : undefined)}
+            note="匹配分仅供筛选参考"
+          />
+        </div>
+      )}
       {report && (
         <div className="hf-match">
           <div className="hf-match-col">
@@ -581,9 +592,17 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
           {tab === 'applications' && (
             <>
               {detail.applications.length === 0 ? (
-                <div className="hf-notice hf-notice--flat">
-                  <span>尚未应聘任何职位——点右上「加入职位」把候选人放进流程。</span>
-                </div>
+                <EmptyState
+                  title="尚未应聘任何职位"
+                  description="把候选人加入某个职位的招聘流程后，面试、匹配分和 Offer 都会显示在这里。"
+                  action={
+                    hasPermission(PERMISSIONS.APPLICATION_CREATE) && (
+                      <Button type="primary" icon={<PlusOutlined />} onClick={() => setApplyOpen(true)}>
+                        加入职位
+                      </Button>
+                    )
+                  }
+                />
               ) : (
                 detail.applications.map((application) => (
                   <ApplicationBlock
@@ -630,16 +649,27 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
           {tab === 'resumes' && (
             <>
               {detail.resumes.length === 0 ? (
-                <div className="hf-notice hf-notice--flat">
-                  <span>暂无简历——导入后 AI 会自动解析出技能标签与画像。</span>
-                </div>
+                <EmptyState
+                  icon={<FileTextOutlined />}
+                  title="暂无简历"
+                  description="导入后 AI 会解析出技能标签与画像。"
+                  action={
+                    hasPermission(PERMISSIONS.CANDIDATE_UPDATE) && (
+                      <Button type="primary" onClick={() => setResumeOpen(true)}>
+                        导入简历
+                      </Button>
+                    )
+                  }
+                />
               ) : (
-                detail.resumes.map((resume) => (
-                  <div className="hf-app-block" key={resume.id}>
+                detail.resumes.map((resume, idx) => (
+                  <div className={idx === 0 ? 'hf-app-block' : 'hf-app-block hf-app-block--old'} key={resume.id}>
                     <div className="hf-app-head">
                       <span className="u-flex-gap-10 u-flex-center-v">
                         <FileTextOutlined />
                         <span className="hf-secondary hf-strong">{resume.fileName ?? '未命名简历'}</span>
+                        {/* 多份简历看不出哪份是最新：按导入时间倒序，第一份打「最新」 */}
+                        {detail.resumes.length > 1 && idx === 0 && <span className="hf-tag hf-tag--deep">最新</span>}
                         <span className={PARSE_STATE_VIEW[parseStateOf(resume)].cls}>
                           {PARSE_STATE_VIEW[parseStateOf(resume)].label}
                         </span>
@@ -677,16 +707,26 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                         <span className="hf-faint hf-td--num">{dayjs(resume.createdAt).format('MM-DD')}</span>
                       </span>
                     </div>
-                    {resume.skills.length > 0 && <div className="hf-iv-row hf-secondary">{resume.skills.join(' · ')}</div>}
-                    {resume.parsed?.summary && <div className="hf-iv-comment">{resume.parsed.summary}</div>}
-                    {resume.rawText && (
-                      <Typography.Paragraph
-                        type="secondary"
-                        className="hf-iv-comment"
-                        ellipsis={{ rows: 3, expandable: true, symbol: '展开全文' }}
-                      >
-                        {resume.rawText}
-                      </Typography.Paragraph>
+                    {/* 正文统一 14px 内边距，与标题行对齐（之前摘要、正文直接贴着卡片左边框） */}
+                    {resume.skills.length > 0 && <div className="hf-resume-skills hf-secondary">{resume.skills.join(' · ')}</div>}
+                    {(resume.parsed?.summary || resume.rawText) && (
+                      <div className="hf-resume-body">
+                        {resume.parsed?.summary && (
+                          <div className="hf-iv-comment hf-resume-summary">
+                            <AiSourceBadge meta={resume.parsed.aiMeta} fallback note="简历摘要" />
+                            <span>{resume.parsed.summary}</span>
+                          </div>
+                        )}
+                        {resume.rawText && (
+                          <Typography.Paragraph
+                            type="secondary"
+                            className="hf-iv-comment"
+                            ellipsis={{ rows: idx === 0 ? 3 : 2, expandable: true, symbol: '展开全文' }}
+                          >
+                            {resume.rawText}
+                          </Typography.Paragraph>
+                        )}
+                      </div>
                     )}
                   </div>
                 ))
@@ -697,9 +737,7 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
           {tab === 'timeline' && (
             <>
               {detail.timeline.length === 0 ? (
-                <div className="hf-notice hf-notice--flat">
-                  <span>暂无操作记录。</span>
-                </div>
+                <EmptyState size="sm" title="暂无操作记录" description="候选人的流转、面试、面评等操作会按时间记录在这里。" />
               ) : (
                 detail.timeline.map((item, i) => (
                   <div className="hf-tl" key={item.id ?? i}>

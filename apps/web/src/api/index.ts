@@ -361,8 +361,10 @@ export const rbacApi = {
 };
 
 export const auditApi = {
-  recent: (page: number, pageSize = 20) =>
+  recent: (page: number, pageSize = 20, actions?: string[]) =>
     http
-      .get<Paginated<ActivityItem>>('/activities/recent', { params: { page, pageSize } })
+      .get<Paginated<ActivityItem>>('/activities/recent', {
+        params: { page, pageSize, ...(actions?.length ? { actions: actions.join(',') } : {}) },
+      })
       .then((r) => r.data),
 };

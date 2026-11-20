@@ -51,11 +51,15 @@ export class ActivityLogService {
     } as Prisma.InputJsonValue);
   }
 
-  /** 审计日志：全局最近操作 */
-  async recent(page: number, pageSize: number) {
+  /** 审计日志：全局最近操作；actionPrefixes 给定时只取这些前缀的动作（如设置页「最近权限变更」） */
+  async recent(page: number, pageSize: number, actionPrefixes?: string[]) {
+    const where: Prisma.ActivityLogWhereInput = actionPrefixes?.length
+      ? { OR: actionPrefixes.map((p) => ({ action: { startsWith: p } })) }
+      : {};
     const [total, items] = await this.prisma.$transaction([
-      this.prisma.activityLog.count(),
+      this.prisma.activityLog.count({ where }),
       this.prisma.activityLog.findMany({
+        where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,

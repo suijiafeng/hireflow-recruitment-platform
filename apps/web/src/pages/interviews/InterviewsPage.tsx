@@ -4,7 +4,7 @@ import { EVALUATION_CONCLUSION_LABEL, PERMISSIONS, type EvaluationConclusion } f
 import { App, Button, DatePicker, Form, Popconfirm, Select, Spin, Table, Tooltip, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { interviewsApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import type { Interview, InterviewerSlot } from '../../api/types';
@@ -17,6 +17,7 @@ import { useSyncedTableScroll } from '../../hooks/useSyncedTableScroll';
 import { useAuthStore } from '../../stores/auth';
 import { FormModal } from '../../components/FormModal';
 import { pressable } from '../../utils/pressable';
+import { useAppDialogs } from '../../hooks/useAppDialogs';
 
 /** 15 分钟一档的全天时间选项 */
 const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
@@ -307,17 +308,18 @@ function SlotsRail({ onOpenCandidate }: { onOpenCandidate: (candidateId: string)
   );
 }
 
-type Filter = 'all' | 'mine' | 'pending';
+type Filter = 'upcoming' | 'all' | 'mine' | 'pending';
 
 export function InterviewsPage() {
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const [evaluateFor, setEvaluateFor] = useState<string | null>(null);
   // 打开的候选人与筛选标签放在网址里：后退关抽屉、刷新不丢筛选
   const [detailId, openDetail, closeDetail] = useDrawerParam('candidate');
   const [scheduleFor, setScheduleFor] = useState<Interview | null>(null);
-  const [filter, setFilter] = useUrlState<Filter>('tab', 'all');
+  // 默认「待进行」：之前默认「全部」按日期正序，最先看到的是 7 月的历史面试，今天的被压在下面
+  const [filter, setFilter] = useUrlState<Filter>('tab', 'upcoming');
 
   const interviewsQuery = useQuery({ queryKey: ['interviews', 'all'], queryFn: () => interviewsApi.list() });
 
@@ -349,11 +351,16 @@ export function InterviewsPage() {
     iv.interviewers.some((i) => i.user.id === currentUserId) &&
     !iv.evaluations.some((ev) => ev.interviewer.id === currentUserId);
 
-  const upcoming = all.filter((iv) => iv.status === 'SCHEDULED').length;
+  const todayStart = dayjs().startOf('day');
+  /** 待进行：已定时间、还没开始或就在今天的面试（不含待安排、不含历史） */
+  const isUpcoming = (iv: Interview) =>
+    iv.status === 'SCHEDULED' && Boolean(iv.scheduledAt) && !dayjs(iv.scheduledAt).isBefore(todayStart);
+  const upcoming = all.filter(isUpcoming).length;
   const pendingCount = all.filter((iv) => !iv.scheduledAt).length;
   const myEvalCount = all.filter(needsMyEval).length;
 
   const visible = all.filter((iv) => {
+    if (filter === 'upcoming') return isUpcoming(iv);
     if (filter === 'pending') return !iv.scheduledAt;
     if (filter === 'mine') return needsMyEval(iv);
     return true;
@@ -362,20 +369,26 @@ export function InterviewsPage() {
   /** 按日分组：待安排单独成组排最上，其余按时间正序 */
   const noDate = visible.filter((iv) => !iv.scheduledAt);
   const dated = visible.filter((iv) => iv.scheduledAt).sort((a, b) => (a.scheduledAt! > b.scheduledAt! ? 1 : -1));
-  const dayGroups: Array<{ key: string; label: string; today: boolean; items: Interview[] }> = [];
+  const dayGroups: Array<{ key: string; label: string; today: boolean; items: Interview[]; future?: boolean }> = [];
   dated.forEach((iv) => {
     const key = dayjs(iv.scheduledAt!).format('MM-DD');
     const last = dayGroups[dayGroups.length - 1];
     if (last && last.key === key) last.items.push(iv);
     else {
       const l = dayLabel(iv.scheduledAt!);
-      dayGroups.push({ key, label: l.text, today: l.today, items: [iv] });
+      dayGroups.push({ key, label: l.text, today: l.today, items: [iv], future: !dayjs(iv.scheduledAt).isBefore(todayStart) });
     }
   });
   const groups = [...(noDate.length ? [{ key: '待安排', label: '', today: false, items: noDate }] : []), ...dayGroups];
 
   /** 各分组的横向滚动串在一起，表头才能只留首组一行 */
   const groupListRef = useSyncedTableScroll<HTMLDivElement>();
+  /** 「全部」里历史在前：打开时滚到今天（或之后最近的一天），不让人先翻过几个月的历史 */
+  const anchorKey = filter === 'all' ? dayGroups.find((g) => g.future)?.key : undefined;
+  useEffect(() => {
+    if (!anchorKey) return;
+    groupListRef.current?.querySelector(`[data-day="${anchorKey}"]`)?.scrollIntoView({ block: 'start' });
+  }, [anchorKey, groupListRef]);
 
   /** 所有分组共用同一套列定义，宽度写死，各组之间才对得齐 */
   const IV_TABLE_X = 836;
@@ -449,8 +462,12 @@ export function InterviewsPage() {
           const done = iv.status === 'COMPLETED';
           const mineTodo = needsMyEval(iv);
           return (
-            <span className={mineTodo ? 'hf-faint hf-state--warn' : 'hf-faint'}>
-              {pending ? '未安排' : done ? '待面评' : '面试后提交'}
+            <span
+              className={mineTodo ? 'hf-faint hf-state--warn u-nowrap' : 'hf-faint u-nowrap'}
+              title={pending ? undefined : done ? '面试已结束，等待面试官提交面评' : '面试结束后由面试官提交'}
+            >
+              {/* 「面试后提交」在 120px 列里被右侧固定列压住截断，缩成短标签，完整说明放悬停 */}
+              {pending ? '未安排' : done ? '待面评' : '未开始'}
             </span>
           );
         }
@@ -516,15 +533,18 @@ export function InterviewsPage() {
       <div className="hf-bar">
         <div className="hf-bar-left">
           <div className="hf-seg">
-            <span className={filter === 'all' ? 'hf-seg--on' : undefined} {...pressable(() => setFilter('all'))}>
-              全部
-            </span>
-            <span className={filter === 'mine' ? 'hf-seg--on' : undefined} {...pressable(() => setFilter('mine'))}>
-              待我面评
-            </span>
-            <span className={filter === 'pending' ? 'hf-seg--on' : undefined} {...pressable(() => setFilter('pending'))}>
-              待安排
-            </span>
+            {(
+              [
+                ['upcoming', '待进行'],
+                ['mine', '待我面评'],
+                ['pending', '待安排'],
+                ['all', '全部'],
+              ] as Array<[Filter, string]>
+            ).map(([key, label]) => (
+              <span key={key} className={filter === key ? 'hf-seg--on' : undefined} {...pressable(() => setFilter(key))}>
+                {label}
+              </span>
+            ))}
           </div>
           <div className="hf-summary">
             <span>
@@ -555,13 +575,17 @@ export function InterviewsPage() {
                 <ScheduleOutlined />
               </div>
               <div>
-                <div className="hf-state-title">{filter === 'all' ? '还没有面试安排' : '没有符合条件的面试'}</div>
+                <div className="hf-state-title">
+                  {filter === 'all' ? '还没有面试安排' : filter === 'upcoming' ? '近期没有待进行的面试' : '没有符合条件的面试'}
+                </div>
                 <div className="hf-state-desc">
                   {filter === 'all'
                     ? hasPermission(PERMISSIONS.INTERVIEW_SCHEDULE)
                       ? '在候选人详情里点「安排面试」，或把卡片拖到面试阶段，面试会自动出现在这里。'
                       : '被指派给你的面试会显示在这里。先在右侧添加可约时段，再用「选时」把链接发给候选人。'
-                    : '切回「全部」查看所有面试。'}
+                    : filter === 'upcoming'
+                      ? '待安排的面试在「待安排」里，历史面试在「全部」里。'
+                      : '切回「全部」查看所有面试。'}
                 </div>
               </div>
             </div>
@@ -571,7 +595,7 @@ export function InterviewsPage() {
                于是表头只需首组保留一行——任何一组横滚，首组表头随其表体一起走，列不会错位。 */
             <div className="hf-agroup-list" ref={groupListRef}>
               {groups.map((g, gi) => (
-                <div key={g.key} className="hf-agroup-item">
+                <div key={g.key} className="hf-agroup-item" data-day={g.key}>
                   <div className="hf-group-head">
                     <span className="hf-group-title hf-td--num">{g.key}</span>
                     {g.label && (

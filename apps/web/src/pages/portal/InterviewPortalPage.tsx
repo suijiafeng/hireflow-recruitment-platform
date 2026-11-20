@@ -1,6 +1,6 @@
 import { CheckOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Result, Spin } from 'antd';
+import { Button, Result, Spin } from 'antd';
 import type { AxiosError } from 'axios';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
@@ -10,6 +10,7 @@ import { portalApi } from '../../api';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { extractErrorMessage } from '../../api/client';
 import { pressable } from '../../utils/pressable';
+import { useAppDialogs } from '../../hooks/useAppDialogs';
 
 /**
  * 免登录 H5 外壳：深色品牌头 + 单列滚动内容 + 固定底部主操作。
@@ -51,7 +52,7 @@ export function PortalShell({
 /** 候选人自助选时：按日分组，档期即选即确认 */
 export function InterviewPortalPage() {
   const { token = '' } = useParams();
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const queryClient = useQueryClient();
   const [slotKey, setSlotKey] = useState<string | null>(null);
 

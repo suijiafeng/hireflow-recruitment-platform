@@ -1,5 +1,6 @@
-import { App, Modal, type FormInstance, type ModalProps } from 'antd';
+import { Modal, type FormInstance, type ModalProps } from 'antd';
 import { useEffect, useId } from 'react';
+import { useAppDialogs } from '../hooks/useAppDialogs';
 
 type Props = ModalProps & {
   /** 弹窗里的表单：有改动时取消 / Esc / 右上角关闭都会先确认 */
@@ -21,7 +22,7 @@ const FIRST_FIELD = [
  * - 打开后自动聚焦第一个可输入字段，打开即可键入。
  */
 export function FormModal({ form, isDirty, onCancel, afterOpenChange, rootClassName, ...rest }: Props) {
-  const { modal } = App.useApp();
+  const { modal } = useAppDialogs();
   const scope = `hf-fm-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
   const dirty = () => Boolean(form?.isFieldsTouched()) || Boolean(isDirty?.());

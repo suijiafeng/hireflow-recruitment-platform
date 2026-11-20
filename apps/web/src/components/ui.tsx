@@ -1,8 +1,8 @@
-import { Card, Empty, Statistic, Tooltip } from 'antd';
-import type { CSSProperties, ReactNode } from 'react';
+import { Card, Statistic, Tooltip } from 'antd';
+import { EmptyState } from './EmptyState';
+import { aiSourceOf } from '../utils/aiProvider';
+import type { ReactNode } from 'react';
 
-/** 数据驱动的尺寸经 CSS 变量传入，静态样式见 styles/app.css */
-const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
 /** 图标徽章：中性灰底灰图标（装饰性颜色零容忍，色彩留给数据与状态） */
 export function IconBadge({ icon, size = 'sm' }: { icon: ReactNode; size?: 'sm' | 'lg' }) {
@@ -50,7 +50,7 @@ export function StatCard({
   );
 }
 
-/** 空态占位块：固定最小高度垂直居中，面板无数据时不塌陷 */
+/** 空态占位块：固定最小高度垂直居中，面板无数据时不塌陷（统一走 EmptyState） */
 export function EmptyBlock({
   description,
   minHeight = 160,
@@ -60,13 +60,7 @@ export function EmptyBlock({
   minHeight?: number;
   children?: ReactNode;
 }) {
-  return (
-    <div className="empty-block" style={cssVars({ '--mh': `${minHeight}px` })}>
-      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={description}>
-        {children}
-      </Empty>
-    </div>
-  );
+  return <EmptyState size="sm" minHeight={minHeight} description={description} action={children} />;
 }
 
 /**
@@ -78,6 +72,30 @@ export function RuleScoreMark({ source }: { source?: string | null }) {
   return (
     <Tooltip title="规则引擎估算（未接大模型或本次调用降级），可在候选人详情里「用 AI 重算」">
       <span className="hf-source-mark">规则</span>
+    </Tooltip>
+  );
+}
+
+/**
+ * AI 产出来源徽标：「AI · 模型名 / 缓存 / 规则」，悬停看完整来源。
+ * 全站 AI 结果（匹配依据、简历摘要、候选人对比、面评草稿、漏斗诊断、入职问答）统一用它，
+ * 用户一眼能分清「大模型给的」和「规则估算的」。
+ */
+export function AiSourceBadge({
+  meta,
+  note,
+  fallback = false,
+}: {
+  meta?: Parameters<typeof aiSourceOf>[0];
+  note?: string;
+  /** 早期数据没有记录来源时仍标出「AI」，而不是不标 */
+  fallback?: boolean;
+}) {
+  const src = aiSourceOf(meta) ?? (fallback ? { kind: 'cache' as const, label: 'AI', detail: 'AI 生成（早期数据，未记录模型）' } : null);
+  if (!src) return null;
+  return (
+    <Tooltip title={[src.detail, note].filter(Boolean).join('；')}>
+      <span className={`hf-ai-badge hf-ai-badge--${src.kind}`}>{src.label}</span>
     </Tooltip>
   );
 }

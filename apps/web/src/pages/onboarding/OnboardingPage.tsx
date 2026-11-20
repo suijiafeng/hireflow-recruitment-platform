@@ -7,7 +7,7 @@ import {
   PERMISSIONS,
   type ContractSignStatus,
 } from '@hireflow/shared';
-import { App, Button, Form, Input, Modal, Select, Spin, Steps, Table, Typography, Upload } from 'antd';
+import { Button, Form, Input, Modal, Select, Spin, Steps, Table, Typography, Upload } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import type { CSSProperties } from 'react';
@@ -22,6 +22,7 @@ import { FormModal } from '../../components/FormModal';
 import { useDrawerParam, useUrlState } from '../../hooks/useUrlState';
 import { prepareUpload } from '../../utils/prepareUpload';
 import { pressable } from '../../utils/pressable';
+import { useAppDialogs } from '../../hooks/useAppDialogs';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -36,7 +37,7 @@ type Filter = 'mine' | 'active' | 'done' | 'review';
 
 /** 右栏：选中入职单的三方清单 + 材料 + 合同。取代原来 720px 抽屉 */
 function DetailRail({ id }: { id: string | null }) {
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const roles = useAuthStore((s) => s.user?.roles ?? []);

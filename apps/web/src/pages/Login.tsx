@@ -129,7 +129,7 @@ export function LoginPage() {
                 iconRender={(visible) => (visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />)}
               />
             </Form.Item>
-            {loginError && <Alert type="error" showIcon message={loginError} className="u-mb-16" />}
+            {loginError && <Alert type="error" showIcon title={loginError} className="u-mb-16" />}
             <Button type="primary" htmlType="submit" block size="large" loading={loginMutation.isPending}>
               登录
             </Button>

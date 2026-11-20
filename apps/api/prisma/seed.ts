@@ -939,7 +939,8 @@ async function seedBulkDemo() {
     '供应链专员', '法务顾问', '行政主管',
   ];
   const jobStatuses = ['OPEN', 'OPEN', 'OPEN', 'PAUSED', 'DRAFT', 'CLOSED', 'PENDING_APPROVAL'] as const;
-  const bulkJobs: Array<{ id: string; title: string; stages: Array<{ id: string; name: string }> }> = [];
+  const bulkJobs: Array<{ id: string; title: string; headcount: number; stages: Array<{ id: string; name: string }> }> = [];
+  const hiredByJob = new Map<string, number>();
   for (let i = 0; i < jobTitles.length; i += 1) {
     const job = await prisma.job.create({
       data: {
@@ -1003,7 +1004,11 @@ async function seedBulkDemo() {
     if (i >= NO_APPLY_FROM) continue; // 未投递的人才库存量
 
     const job = pick(bulkJobs, i * 3);
-    const outcome = pick(OUTCOMES, i);
+    // 已入职不超过该职位 HC：之前「供应链专员」HC 1 却入职 11 人，职位页显示 11 / 1
+    const plannedOutcome = pick(OUTCOMES, i);
+    const hiredSoFar = hiredByJob.get(job.id) ?? 0;
+    const outcome = plannedOutcome === 'HIRED' && hiredSoFar >= job.headcount ? 'ACTIVE' : plannedOutcome;
+    if (outcome === 'HIRED') hiredByJob.set(job.id, hiredSoFar + 1);
     const stageIdx = outcome === 'HIRED' ? 5 : outcome === 'REJECTED' ? (i % 3) + 1 : i % 4;
     const stage = job.stages[stageIdx] ?? job.stages[0];
     // 每 9 个留一个没有匹配分：列表与卡片的 '—' 分支

@@ -1,17 +1,20 @@
 import { RobotOutlined } from '@ant-design/icons';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AI_DRAFT_MARKER,
   DEFAULT_SCORECARD_TEMPLATE,
   EVALUATION_CONCLUSION_LABEL,
   EvaluationConclusion,
 } from '@hireflow/shared';
-import { App, Button, Form, Input } from 'antd';
+import { Button, Form, Input } from 'antd';
 import { useEffect, useState } from 'react';
-import { interviewsApi } from '../api';
+import { aiApi, interviewsApi } from '../api';
+import type { AiMeta } from '../api/types';
+import { AiSourceBadge } from './ui';
 import { extractErrorMessage } from '../api/client';
 import { FormModal } from './FormModal';
 import { pressable } from '../utils/pressable';
+import { useAppDialogs } from '../hooks/useAppDialogs';
 
 const DEFAULT_DIMENSIONS = DEFAULT_SCORECARD_TEMPLATE.map((t) => t.dimension);
 const SCORES = [1, 2, 3, 4, 5];
@@ -94,7 +97,7 @@ type EvaluationValues = { scores: Record<string, number>; conclusion: string; co
 /** 结构化评分卡面评：AI 生成草稿 → 面试官修改确认 */
 export function EvaluationModal({ interviewId, dimensions, subtitle, onClose }: Props) {
   const dims = dimensions?.length ? dimensions : DEFAULT_DIMENSIONS;
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const queryClient = useQueryClient();
   const [form] = Form.useForm();
   const [notes, setNotes] = useState('');
@@ -120,13 +123,23 @@ export function EvaluationModal({ interviewId, dimensions, subtitle, onClose }: 
   const close = () => {
     if (interviewId) clearDraft(interviewId);
     form.resetFields();
+    setLastDraftMeta(null);
     setNotes('');
     onClose();
   };
 
+  const aiStatus = useQuery({
+    queryKey: ['ai-status'],
+    queryFn: () => aiApi.status(),
+    staleTime: 5 * 60_000,
+    enabled: Boolean(interviewId),
+  });
+  const [lastDraftMeta, setLastDraftMeta] = useState<AiMeta | null>(null);
+
   const draftMutation = useMutation({
     mutationFn: () => interviewsApi.draftEvaluation(interviewId!, notes),
     onSuccess: (draft) => {
+      setLastDraftMeta(draft.aiMeta);
       const scores: Record<string, number> = {};
       draft.scorecard.forEach((s) => {
         scores[s.dimension] = s.score;
@@ -186,7 +199,11 @@ export function EvaluationModal({ interviewId, dimensions, subtitle, onClose }: 
       <div className="hf-ai-box u-mb-16">
         <div className="hf-ai-head">
           <RobotOutlined /> 面试 Copilot
-          <span className="hf-faint">规则引擎</span>
+          {/* 之前写死「规则引擎」：接了大模型也这么显示。改为按本次草稿 / 当前配置显示来源 */}
+          <AiSourceBadge
+            meta={lastDraftMeta ?? (aiStatus.data ? { provider: aiStatus.data.mode === 'mock' ? 'mock' : aiStatus.data.label } : undefined)}
+            note="草稿仅供参考，以你确认提交的为准"
+          />
         </div>
         <div className="hf-ai-desc">粘贴面试记录，AI 生成评分卡草稿；最终以你修改确认的为准。</div>
         <Input.TextArea

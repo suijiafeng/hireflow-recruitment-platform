@@ -7,7 +7,7 @@ import {
   type OfferApprovalStatus,
   type OfferDecision,
 } from '@hireflow/shared';
-import { App, Modal, Spin, Table, Typography } from 'antd';
+import { Modal, Spin, Table, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
@@ -24,6 +24,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useDrawerParam, useUrlParams, useUrlState } from '../../hooks/useUrlState';
 import { CandidateDetailDrawer } from '../../components/CandidateDetailDrawer';
 import { pressable } from '../../utils/pressable';
+import { useAppDialogs } from '../../hooks/useAppDialogs';
 
 /** 分组顺序 = 流程顺序，待办排最上 */
 const GROUPS: Array<{ key: string; label: string; dot: string; tone: string }> = [
@@ -78,7 +79,7 @@ function RetentionModal({ offerId, onClose }: { offerId: string | null; onClose:
 }
 
 export function OffersPage() {
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const [retentionFor, setRetentionFor] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
@@ -221,7 +222,7 @@ export function OffersPage() {
                   hint: '批准该 Offer',
                   onClick: ask('批准该 Offer？', '批准后可发送给候选人。', () => offersApi.approve(o.id), '已批准'),
                 },
-                { key: 'reject', label: '驳回', hint: '驳回并填写原因', danger: true, onClick: () => setRejectTarget(o) },
+                { key: 'reject', label: '驳回', hint: '驳回并填写原因', danger: true, pinned: true, onClick: () => setRejectTarget(o) },
               ]
             : []),
           ...(st === 'REJECTED' && canInitiate

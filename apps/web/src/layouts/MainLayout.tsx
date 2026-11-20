@@ -1,4 +1,5 @@
 import {
+  CloseOutlined,
   AppstoreOutlined,
   AuditOutlined,
   CommentOutlined,
@@ -15,7 +16,7 @@ import {
   UserOutlined,
 } from '@ant-design/icons';
 import { ROLE_LABEL, type RoleCode } from '@hireflow/shared';
-import { Avatar, Breadcrumb, Button, Drawer, Dropdown, Layout, Menu, Result, Space, Tag, Typography } from 'antd';
+import { Avatar, Breadcrumb, Button, Drawer, Dropdown, Layout, Menu, Space, Tag, Typography } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { authApi } from '../api';
@@ -24,6 +25,7 @@ import { NotificationBell } from '../components/NotificationBell';
 import { useAuthStore } from '../stores/auth';
 import { loginUrlFor } from '../utils/redirect';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { EmptyState } from '../components/EmptyState';
 import { firstVisiblePath, NAV_GROUPS } from './nav';
 
 const { Header, Sider, Content } = Layout;
@@ -191,6 +193,14 @@ export function MainLayout() {
             <div className="sider-logo-text">
               <div className="sider-logo-name">ART 智能招聘</div>
             </div>
+            {/* 和全站弹层一致：关闭在右上角；点遮罩、Esc 同样可关 */}
+            <Button
+              className="mobile-menu-close"
+              type="text"
+              icon={<CloseOutlined />}
+              aria-label="关闭菜单"
+              onClick={() => setMobileMenuOpen(false)}
+            />
           </div>
           <div className="sider-menu-scroll">{menu}</div>
         </div>
@@ -242,12 +252,13 @@ export function MainLayout() {
           {canViewCurrent ? (
             <Outlet />
           ) : (
-            <Result
-              status="403"
+            <EmptyState
+              size="lg"
+              tone="forbidden"
               title="无权访问"
-              subTitle="当前角色没有查看此页面的权限，如需访问请联系管理员"
-              extra={
-                <Button type="link" onClick={() => navigate(firstVisiblePath(hasPermission), { replace: true })}>
+              description="当前角色没有查看此页面的权限，如需访问请联系管理员"
+              action={
+                <Button type="primary" onClick={() => navigate(firstVisiblePath(hasPermission), { replace: true })}>
                   返回我的首页
                 </Button>
               }

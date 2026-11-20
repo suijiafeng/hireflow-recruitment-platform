@@ -1350,15 +1350,19 @@
 /* ---------------- 按钮样式优化 ---------------- */
 /* 全站规则「没有 hover 位移、卡片不带投影」：主按钮只靠底色深阶给反馈，
    原来的 translateY(-1px) + 投影已删（这条是全局规则，看板/大盘/登录都吃到）。 */
-.ant-btn-primary {
+/* 只覆盖普通主按钮：之前不带 :not(.ant-btn-dangerous)，「删除 / 淘汰 / 停用」等危险主按钮也被刷成品牌蓝，
+   和「保存」长得一样——危险操作必须一眼可辨 */
+.ant-btn-primary:not(.ant-btn-dangerous):not(:disabled) {
   background: #2563EB;
   border: none;
   box-shadow: none;
   transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.ant-btn-primary:hover {
+.ant-btn-primary:not(.ant-btn-dangerous):not(:disabled):hover {
   background: #1E40AF;
 }
+.ant-btn-primary.ant-btn-dangerous:not(:disabled) { background: #dc2626; border: none; box-shadow: none; }
+.ant-btn-primary.ant-btn-dangerous:not(:disabled):hover { background: #b91c1c; }
 
 /* ---------------- 卡片通用样式 ---------------- */
 .ant-card {
@@ -4657,11 +4661,221 @@
   margin-left: 4px;
   padding: 0 4px;
   border-radius: 3px;
-  background: #f4f5f6;
-  color: rgba(26, 26, 26, 0.5);
+  /* 与 AI 来源徽标的「规则」同色：全站规则估算一个颜色 */
+  background: #fff7ed;
+  color: #b45309;
   font-size: 10px;
   font-weight: 600;
   line-height: 16px;
 }
 
 .hf-select-days { width: 120px; }
+
+/* ============================================================
+   第 2 轮：统一空状态 / 弹层关闭按钮 / 操作按钮热区 / 移动端
+   ============================================================ */
+
+/* ---- 统一空状态：图标 + 一句话 + 主操作（取代 antd Empty 插画与 403 卡通） ---- */
+.hf-empty {
+  min-height: var(--mh, auto);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 20px 16px;
+  text-align: center;
+  color: rgba(26, 26, 26, 0.5);
+}
+.hf-empty-icon {
+  width: 40px;
+  height: 40px;
+  margin-bottom: 6px;
+  border: 1px solid #e6e7e9;
+  border-radius: 10px;
+  background: #fafafa;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(26, 26, 26, 0.35);
+  font-size: 18px;
+}
+.hf-empty-title { font-size: var(--fs-base); font-weight: 600; color: #1a1a1a; }
+.hf-empty-desc { max-width: 400px; font-size: var(--fs-sm); line-height: 1.6; text-wrap: pretty; }
+.hf-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+.hf-empty--sm { padding: 16px 12px; gap: 4px; }
+.hf-empty--sm .hf-empty-icon { width: 32px; height: 32px; font-size: 15px; border-radius: 8px; margin-bottom: 4px; }
+.hf-empty--sm .hf-empty-title { font-size: var(--fs-sm); }
+.hf-empty--sm .hf-empty-desc { font-size: var(--fs-xs); }
+.hf-empty--lg { min-height: var(--mh, 60vh); gap: 8px; }
+.hf-empty--lg .hf-empty-icon { width: 52px; height: 52px; font-size: 22px; border-radius: 12px; margin-bottom: 8px; }
+.hf-empty--lg .hf-empty-title { font-size: var(--fs-title-sm); }
+.hf-empty--warn .hf-empty-icon { border-color: #fde68a; background: #fffbeb; color: #b45309; }
+.hf-empty--forbidden .hf-empty-icon { border-color: #dbe4f5; background: #f5f8ff; color: #2563EB; }
+
+/* ---- 弹窗：关闭按钮统一在右上角，与标题行垂直居中，36px 热区 ---- */
+.ant-modal .ant-modal-header { border-bottom: 1px solid #eeeff1; }
+.ant-modal .ant-modal-footer { border-top: 1px solid #eeeff1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.ant-modal .ant-modal-footer > .ant-btn + .ant-btn { margin-inline-start: 0; }
+.ant-modal .ant-modal-close {
+  top: 12px;
+  inset-inline-end: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  color: rgba(26, 26, 26, 0.55);
+}
+.ant-modal .ant-modal-close:hover { color: #1a1a1a; background: #f2f3f5; }
+/* 确认框：内容区自带内边距；× 与标题同一行，标题右侧让位 */
+.ant-modal-confirm .ant-modal-container { padding: 22px 24px 18px; }
+.ant-modal-confirm .ant-modal-close { top: 14px; inset-inline-end: 14px; }
+.ant-modal-confirm .ant-modal-confirm-title { padding-inline-end: 32px; }
+.ant-modal-confirm .ant-modal-confirm-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.ant-modal-confirm .ant-modal-confirm-btns > .ant-btn + .ant-btn { margin-inline-start: 0; }
+
+/* ---- 抽屉：所有抽屉的 × 都在右上角（antd 默认放在标题左侧），36px 热区 ---- */
+.ant-drawer .ant-drawer-header-title { flex-direction: row-reverse; }
+.ant-drawer .ant-drawer-header-title .ant-drawer-close {
+  margin-inline-end: 0;
+  margin-inline-start: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  color: rgba(26, 26, 26, 0.55);
+}
+.ant-drawer .ant-drawer-header-title .ant-drawer-close:hover { color: #1a1a1a; background: #f2f3f5; }
+.mobile-menu .sider-logo { position: relative; }
+.mobile-menu-close.ant-btn {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  color: rgba(255, 255, 255, 0.7);
+}
+.mobile-menu-close.ant-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.08) !important; }
+
+/* ---- 表格行操作：文字链接扩大热区（视觉不变），触屏 ≥ 36px ---- */
+.hf-row-acts .hf-link,
+.hf-row-acts .hf-more {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 2px;
+  border-radius: 6px;
+}
+.hf-row-acts .hf-more { min-width: 28px; justify-content: center; }
+.hf-row-acts .hf-more:hover { background: #f2f3f5; color: #1a1a1a; }
+@media (pointer: coarse) {
+  .hf-row-acts .hf-link,
+  .hf-row-acts .hf-more,
+  .hf-app-foot .hf-link { min-height: 36px; }
+  .hf-row-acts .hf-more { min-width: 36px; }
+}
+.ant-modal .ant-modal-header { margin: 0; padding: 18px 56px 14px 20px; }
+.ant-modal .ant-modal-body { padding: 16px 20px; }
+.ant-modal .ant-modal-footer { margin: 0; padding: 14px 20px; }
+.ant-modal.ant-modal-confirm .ant-modal-body { padding: 0; }
+
+/* ---- 看板：空列收窄、去掉虚线框；拖拽经过时才显示落点 ---- */
+.kanban-col--empty { flex: 0.55 1 0; min-width: 132px; }
+.kanban-col--empty .kanban-col-scroll { background: #fcfcfc; }
+.kanban-col-empty { border: none; padding: 10px 4px; font-size: var(--fs-xs); color: rgba(26, 26, 26, 0.3); }
+.kanban-col--over .kanban-col-empty { border: 1px dashed #2563EB; color: #2563EB; }
+
+@media (max-width: 767px) {
+  /* 看板工具栏改两行：职位下拉独占一行；第二行左统计、右操作（之前三者挤在一行互相重叠，统计被挤成一字一行） */
+  .pipeline-bar { height: auto; flex-wrap: wrap; padding: 10px 12px; row-gap: 10px; column-gap: 12px; }
+  .pipeline-bar-left { display: contents; }
+  .pipeline-bar-left > .ant-select { flex: 1 1 100%; width: 100% !important; }
+  .pipeline-bar-summary { flex: 1 1 auto; gap: 10px; white-space: nowrap; min-width: 0; }
+  .pipeline-bar > .ant-space { margin-left: auto; }
+  .pipeline-bar--batch { flex-wrap: wrap; height: auto; padding: 10px 12px; row-gap: 10px; }
+  .pipeline-bar--batch > .ant-space:last-child { flex-wrap: wrap; row-gap: 8px; }
+  .pipeline-bar--batch .batch-hint { display: none; }
+  /* 列横向滑动 + 吸附，固定列宽；空列在手机上也不必占满一列 */
+  .kanban-board { scroll-snap-type: x proximity; }
+  .kanban-col { scroll-snap-align: start; flex: 0 0 240px; }
+  .kanban-col--empty { flex: 0 0 140px; min-width: 140px; }
+}
+
+/* HC 超编：数字标红 + 「超编 N」 */
+.hf-progress--over .hf-progress-num { color: #dc2626; }
+.hf-hc-over { flex-shrink: 0; margin-left: -4px; cursor: help; }
+
+/* ---- AI 来源徽标：AI · 模型 / 缓存 / 规则 ---- */
+.hf-ai-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 4px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: help;
+  vertical-align: middle;
+}
+.hf-ai-badge--ai { background: #EFF6FF; color: #1E40AF; }
+.hf-ai-badge--cache { background: #f4f5f6; color: rgba(26, 26, 26, 0.6); }
+.hf-ai-badge--rule { background: #fff7ed; color: #b45309; }
+
+/* ---- 抽屉简历卡：正文与标题行同样的 14px 内边距；最新一份打标，旧版本降一级 ---- */
+.hf-resume-body { padding: 10px 14px 12px; }
+.hf-resume-body .hf-iv-comment { margin-top: 0; }
+.hf-resume-body .hf-iv-comment + .hf-iv-comment { margin-top: 8px; }
+.hf-resume-summary { display: flex; gap: 8px; align-items: flex-start; }
+.hf-resume-summary .hf-ai-badge { margin-top: 2px; flex-shrink: 0; }
+.hf-resume-skills { padding: 10px 14px 0; font-size: var(--fs-sm); }
+.hf-app-block--old .hf-app-head { background: #fff; }
+.hf-app-block--old .hf-strong { font-weight: 500; }
+.hf-match-source { display: flex; align-items: center; gap: 8px; padding: 10px 14px 0; }
+.hf-resume-body .ant-typography { margin-bottom: 0; }
+
+/* ---- 通知：铃铛是 40px 按钮；面板标题行右侧「全部已读 ×」，列表不用已弃用的 antd List ---- */
+.bell-btn.ant-btn { width: 40px; height: 40px; padding: 0; border-radius: 8px; }
+.bell-btn .bell-icon { padding: 0; background: none !important; }
+.notif-head { gap: 8px; }
+.notif-close.ant-btn { width: 32px; height: 32px; margin-right: -6px; color: rgba(26, 26, 26, 0.55); }
+.notif-list { list-style: none; margin: 0; padding: 0; }
+.notif-list > .notif-item + .notif-item { margin-top: 2px; }
+/* 内容区不留外边距：页眉 / 正文 / 页脚各自给内边距，页眉右侧给 × 留 56px，标题再长也不压到 × */
+.ant-modal:not(.ant-modal-confirm) .ant-modal-container { padding: 0; }
+
+@media (max-width: 767px) {
+  /* 大盘漏斗：表头不再被挤成「到 / 达 / /」竖排；标签与数字列收窄，条形区吃剩余宽度 */
+  .funnel-colhead { padding-left: 60px; gap: 8px; white-space: nowrap; }
+  .funnel-colhead-plot { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .funnel-colhead > span:not(.funnel-colhead-plot) { width: 36px; }
+  .funnel-colhead > span:last-child { width: 44px; }
+  .funnel-row { gap: 8px; }
+  .funnel-label { width: 52px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .funnel-num { width: 36px; }
+  .funnel-rate { width: 44px; }
+  .funnel-drop { padding-left: 60px; }
+}
+/* 热区加了内边距，间距相应收一点，操作列总宽不变（列宽是按原来的文字宽度定的） */
+.hf-row-acts.u-flex-gap-12 { gap: 6px; }
+
+@media (max-width: 767px) {
+  /* 抽屉应聘卡底部操作：之前四个链接挤一行被折成「安排下一 / 轮」「淘 / 汰」，改为可换行、链接不断字；
+     「淘汰」仍单独靠右 */
+  .hf-app-foot { flex-wrap: wrap; row-gap: 4px; column-gap: 14px; }
+  .hf-app-foot .hf-link { white-space: nowrap; }
+  .pipeline-bar-summary { flex: 0 1 auto; gap: 8px; }
+  .pipeline-bar-summary .sep { display: none; }
+}
+.hf-iv-row .hf-strong,
+.hf-iv-row .hf-td--num { white-space: nowrap; flex-shrink: 0; }
+@media (max-width: 767px) {
+  .hf-app-foot > .u-flex-1 { display: none; }
+  .hf-app-foot > .hf-link--danger { margin-left: auto; }
+  .funnel-label { width: 60px; font-size: var(--fs-xs); }
+  .funnel-colhead,
+  .funnel-drop { padding-left: 68px; }
+}
+.hf-empty-inline { padding: 8px 12px; font-size: var(--fs-sm); color: rgba(26, 26, 26, 0.45); text-align: center; }

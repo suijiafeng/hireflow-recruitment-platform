@@ -7,6 +7,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router/dom';
 import { router } from './router';
+import { EmptyState } from './components/EmptyState';
 import { buildTheme } from './theme';
 import './styles/global.css';
 import './styles/app.css';
@@ -25,6 +26,12 @@ const disableMotion =
   window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
   localStorage.getItem('arthr:no-motion') === '1';
 
+/** 全局空态：表格用统一的 EmptyState；下拉、级联等只给一行小字，不撑高下拉面板 */
+function renderEmpty(componentName?: string) {
+  if (componentName === 'Table' || componentName === 'List') return <EmptyState size="sm" description="暂无数据" />;
+  return <div className="hf-empty-inline">无匹配选项</div>;
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 30_000 },
@@ -34,7 +41,14 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {/* 点遮罩不关闭弹窗：误触会丢掉已填内容；关闭走取消 / Esc / 右上角，由 FormModal 做未保存确认 */}
-    <ConfigProvider locale={zhCN} theme={buildTheme(disableMotion)} modal={{ mask: { closable: false } }}>
+    {/* 弹层约定：Modal 点遮罩不关、Esc / 右上角 × 关；Drawer（只读查看）点遮罩、Esc、× 都可关。
+        表格 / 下拉的空态统一走 EmptyState，不用 antd 默认插画 */}
+    <ConfigProvider
+      locale={zhCN}
+      theme={buildTheme(disableMotion)}
+      modal={{ mask: { closable: false } }}
+      renderEmpty={renderEmpty}
+    >
       <AntApp>
         <QueryClientProvider client={queryClient}>
           <RouterProvider router={router} />
