@@ -1,14 +1,16 @@
-import { PlusOutlined, TeamOutlined } from '@ant-design/icons';
+import { CloudUploadOutlined, DownloadOutlined, PlusOutlined, TeamOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PERMISSIONS } from '@hireflow/shared';
-import { Button, Form, Input, Select, Spin, Table, Tag } from 'antd';
+import { PERMISSIONS, StageKind } from '@hireflow/shared';
+import { Button, DatePicker, Form, Input, Select, Spin, Table, Tag } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import type { CSSProperties } from 'react';
 import { useState } from 'react';
-import { candidatesApi } from '../../api';
+import { candidatesApi, jobsApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
-import type { Candidate } from '../../api/types';
+import type { Candidate, CandidateFilters } from '../../api/types';
+import { CANDIDATE_SOURCES, ResumeIntakeModal } from '../../components/ResumeIntakeModal';
+import { downloadBlob } from '../../utils/csv';
 import { CandidateDetailDrawer } from '../../components/CandidateDetailDrawer';
 import { QueryErrorResult } from '../../components/QueryErrorResult';
 import { RowActions } from '../../components/RowActions';
@@ -21,6 +23,21 @@ import { useAppDialogs } from '../../hooks/useAppDialogs';
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
 const PAGE_SIZE = 20;
+
+const STAGE_OPTIONS = [
+  { value: StageKind.SCREENING, label: '筛选' },
+  { value: StageKind.INTERVIEW, label: '面试' },
+  { value: StageKind.OFFER, label: '录用' },
+  { value: StageKind.ONBOARDING, label: '入职' },
+];
+const STATUS_OPTIONS = [
+  { value: 'ACTIVE', label: '流程中' },
+  { value: 'HIRED', label: '已入职' },
+  { value: 'REJECTED', label: '已淘汰' },
+  { value: 'WITHDRAWN', label: '已撤回' },
+  { value: 'NONE', label: '未投递' },
+];
+const SCORE_OPTIONS = [60, 70, 80, 85].map((n) => ({ value: n, label: `${n} 分以上` }));
 
 /** 匹配分：≥85 正向绿，≥70 中性墨，其余偏弱用琥珀。不拿品牌色给每一行上色。 */
 function scoreColor(score: number) {
@@ -48,6 +65,24 @@ export function CandidatesPage() {
   const keyword = params.get('q') ?? '';
   /** 从大盘「待处理新简历」进来时带 stage=screening，只看待初筛的人 */
   const stage = params.get('stage') === 'screening' ? ('screening' as const) : undefined;
+  const filters: CandidateFilters = {
+    keyword: keyword || undefined,
+    stage,
+    jobId: params.get('job') ?? undefined,
+    stageKind: (params.get('kind') as StageKind | null) ?? undefined,
+    status: (params.get('status') as CandidateFilters['status'] | null) ?? undefined,
+    source: params.get('source') ?? undefined,
+    minScore: params.get('min') ? Number(params.get('min')) : undefined,
+    createdFrom: params.get('from') ?? undefined,
+    createdTo: params.get('to') ?? undefined,
+  };
+  const filtered = Boolean(
+    filters.jobId || filters.stageKind || filters.status || filters.source || filters.minScore != null || filters.createdFrom,
+  );
+  const setFilter = (patch: Record<string, string | number | null | undefined>) =>
+    updateParams({ ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, v ?? null])), page: null });
+  const [intakeOpen, setIntakeOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [detailId, openDetail, closeDetail] = useDrawerParam('candidate');
   const setPage = (p: number) => updateParams({ page: p === 1 ? null : p });
   const [createOpen, setCreateOpen] = useState(false);
@@ -55,9 +90,27 @@ export function CandidatesPage() {
   const [form] = Form.useForm();
 
   const candidatesQuery = useQuery({
-    queryKey: ['candidates', page, keyword, stage],
-    queryFn: () => candidatesApi.list({ page, pageSize: PAGE_SIZE, keyword: keyword || undefined, stage }),
+    queryKey: ['candidates', page, filters],
+    queryFn: () => candidatesApi.list({ page, pageSize: PAGE_SIZE, ...filters }),
   });
+  const jobsQuery = useQuery({
+    queryKey: ['jobs', 'options'],
+    queryFn: () => jobsApi.list({ page: 1, pageSize: 100 }),
+  });
+  const sourcesQuery = useQuery({ queryKey: ['candidates', 'sources'], queryFn: candidatesApi.sources });
+
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      const { blob, fileName, rows } = await candidatesApi.exportXlsx(filters);
+      downloadBlob(fileName, blob);
+      message.success(`已导出 ${rows} 位候选人`);
+    } catch (error) {
+      message.error(extractErrorMessage(error, '导出失败'));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const createMutation = useMutation({
     mutationFn: candidatesApi.create,
@@ -266,12 +319,58 @@ export function CandidatesPage() {
           )}
         </div>
         <div className="hf-bar-right">
+          <Button icon={<DownloadOutlined />} loading={exporting} disabled={total === 0} onClick={() => void exportExcel()}>
+            导出 Excel
+          </Button>
           {hasPermission(PERMISSIONS.CANDIDATE_CREATE) && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+            <Button icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
               新增候选人
             </Button>
           )}
+          {hasPermission(PERMISSIONS.CANDIDATE_CREATE) && hasPermission(PERMISSIONS.APPLICATION_CREATE) && (
+            <Button type="primary" icon={<CloudUploadOutlined />} onClick={() => setIntakeOpen(true)}>
+              上传简历
+            </Button>
+          )}
         </div>
+      </div>
+
+      <div className="cand-filters">
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          placeholder="应聘职位"
+          className="w-200"
+          value={filters.jobId}
+          onChange={(v) => setFilter({ job: v })}
+          options={(jobsQuery.data?.items ?? []).map((j) => ({ value: j.id, label: j.title }))}
+        />
+        <Select allowClear placeholder="所在阶段" value={filters.stageKind} onChange={(v) => setFilter({ kind: v })} options={STAGE_OPTIONS} />
+        <Select allowClear placeholder="应聘状态" value={filters.status} onChange={(v) => setFilter({ status: v })} options={STATUS_OPTIONS} />
+        <Select
+          allowClear
+          placeholder="来源渠道"
+          value={filters.source}
+          onChange={(v) => setFilter({ source: v })}
+          options={[...new Set([...CANDIDATE_SOURCES, ...(sourcesQuery.data ?? [])])].map((v) => ({ value: v, label: v }))}
+        />
+        <Select allowClear placeholder="匹配分" value={filters.minScore} onChange={(v) => setFilter({ min: v })} options={SCORE_OPTIONS} />
+        <DatePicker.RangePicker
+          placeholder={['建档起', '建档止']}
+          value={filters.createdFrom && filters.createdTo ? [dayjs(filters.createdFrom), dayjs(filters.createdTo)] : null}
+          onChange={(range) =>
+            setFilter({ from: range?.[0]?.format('YYYY-MM-DD'), to: range?.[1]?.format('YYYY-MM-DD') })
+          }
+        />
+        {filtered && (
+          <Button
+            type="link"
+            onClick={() => setFilter({ job: null, kind: null, status: null, source: null, min: null, from: null, to: null })}
+          >
+            清除筛选
+          </Button>
+        )}
       </div>
 
       <div className="hf-body">
@@ -287,9 +386,9 @@ export function CandidatesPage() {
               <TeamOutlined />
             </div>
             <div>
-              <div className="hf-state-title">{keyword ? '没有匹配的候选人' : '候选人库还是空的'}</div>
+              <div className="hf-state-title">{keyword || filtered ? '没有匹配的候选人' : '候选人库还是空的'}</div>
               <div className="hf-state-desc">
-                {keyword ? '换个关键词，或清空搜索查看全部。' : '导入简历或从人才库唤醒历史候选人后，这里会列出全部候选人。'}
+                {keyword || filtered ? '换个关键词或放宽筛选条件。' : '上传简历或从人才库唤醒历史候选人后，这里会列出全部候选人。'}
               </div>
             </div>
             {keyword ? (
@@ -334,6 +433,15 @@ export function CandidatesPage() {
       </div>
 
       <CandidateDetailDrawer candidateId={detailId} onClose={closeDetail} />
+      <ResumeIntakeModal
+        open={intakeOpen}
+        onClose={() => setIntakeOpen(false)}
+        onOpenCandidate={(id) => {
+          setIntakeOpen(false);
+          openDetail(id);
+        }}
+        defaultJobId={filters.jobId}
+      />
 
       <FormModal form={form}
         className="hf-modal"
@@ -374,7 +482,7 @@ export function CandidatesPage() {
             <Select
               allowClear
               placeholder="选择来源"
-              options={['BOSS直聘', '猎聘', '拉勾', '内推', '猎头推荐', '官网投递', '人才库唤醒'].map((s) => ({
+              options={CANDIDATE_SOURCES.map((s) => ({
                 value: s,
                 label: s,
               }))}

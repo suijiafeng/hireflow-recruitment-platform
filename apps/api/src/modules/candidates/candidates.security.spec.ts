@@ -11,6 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { CandidatesController } from './candidates.controller';
 import { CandidatesService, PARSE_STALE_MS } from './candidates.service';
+import { ResumeIntakeService } from './resume-intake.service';
 import { ResumesController } from './resumes.controller';
 
 /** HTTP + 全局校验/权限守卫 + 临时数据库；AI/对象存储用桩核对拒绝请求没有外部副作用。 */
@@ -66,6 +67,8 @@ describe('候选人写入范围与简历输入安全', () => {
         { provide: PrismaService, useValue: prisma }, ActivityLogService,
         { provide: CandidatesService, useFactory: (log: ActivityLogService) =>
           new CandidatesService(prisma, log, ai as never, storage as never), inject: [ActivityLogService] },
+        // 自动建档的范围校验在 intake.e2e.spec 里覆盖，这里只需让控制器能实例化
+        { provide: ResumeIntakeService, useValue: {} },
         { provide: APP_GUARD, useValue: { canActivate(context: ExecutionContext) {
           context.switchToHttp().getRequest().user = currentUser;
           return true;

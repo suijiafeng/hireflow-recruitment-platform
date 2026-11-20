@@ -19,7 +19,8 @@ import { StorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AddResumeDto } from './dto/add-resume.dto';
 import { CreateCandidateDto } from './dto/create-candidate.dto';
-import { QueryCandidatesDto } from './dto/query-candidates.dto';
+import { CandidateFilterDto, QueryCandidatesDto } from './dto/query-candidates.dto';
+import { canExtractText, extractResumeText } from './resume-text';
 
 /**
  * 「待处理新简历」：在招职位里仍停在第一阶段的在途应聘。大盘待办与候选人列表筛选共用这一个口径，
@@ -39,6 +40,21 @@ export function pendingScreeningWhere(deptScope: string[] | null): Prisma.Candid
 
 /** 简历 PARSING 状态的超时：超过即视为上次解析进程已中断，可重新发起（需大于 AI 调用截止时间） */
 export const PARSE_STALE_MS = 120_000;
+
+/** 单次导出上限：再多就该用分析报表，而不是把整库联系方式拉成一个文件 */
+export const EXPORT_LIMIT = 5000;
+
+const APPLICATION_STATUS_LABEL: Record<string, string> = {
+  ACTIVE: '流程中',
+  HIRED: '已入职',
+  REJECTED: '已淘汰',
+  WITHDRAWN: '已撤回',
+};
+
+/** 导出表格里的时间按北京时间展示 */
+function formatBeijing(date: Date): string {
+  return new Date(date.getTime() + 8 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ');
+}
 
 @Injectable()
 export class CandidatesService {
@@ -107,25 +123,44 @@ export class CandidatesService {
     return {};
   }
 
-  async list(query: QueryCandidatesDto, user: JwtUser) {
-    const { page = 1, pageSize = 20, keyword, stage } = query;
-    // 各条件用 AND 组合：范围条件与「待初筛」都落在 applications 上，展开合并会互相覆盖
-    const where: Prisma.CandidateWhereInput = {
+  /** 列表与导出共用的筛选条件；各条件用 AND 组合（范围、待初筛、应聘条件都落在 applications 上，展开合并会互相覆盖） */
+  private filterWhere(query: CandidateFilterDto, user: JwtUser): Prisma.CandidateWhereInput {
+    const { keyword, stage, jobId, stageKind, status, source, minScore, createdFrom, createdTo } = query;
+    const app: Prisma.ApplicationWhereInput = {
+      ...(jobId ? { jobId } : {}),
+      ...(stageKind ? { stage: { kind: stageKind } } : {}),
+      ...(status && status !== 'NONE' ? { status } : {}),
+      ...(minScore != null ? { matchScore: { gte: minScore } } : {}),
+    };
+    const created: Prisma.DateTimeFilter = {};
+    if (createdFrom) created.gte = new Date(`${createdFrom.slice(0, 10)}T00:00:00+08:00`);
+    if (createdTo) created.lt = new Date(new Date(`${createdTo.slice(0, 10)}T00:00:00+08:00`).getTime() + 86_400_000);
+    const trimmed = keyword?.trim();
+    return {
       AND: [
         this.candidateScopeWhere(user),
-        keyword
+        trimmed
           ? {
               OR: [
-                { name: { contains: keyword, mode: 'insensitive' } },
-                { email: { contains: keyword, mode: 'insensitive' } },
-                { phone: { contains: keyword } },
-                { tags: { has: keyword } },
+                { name: { contains: trimmed, mode: 'insensitive' } },
+                { email: { contains: trimmed, mode: 'insensitive' } },
+                { phone: { contains: trimmed } },
+                { tags: { has: trimmed } },
               ],
             }
           : {},
         stage === 'screening' ? pendingScreeningWhere(departmentScopeOf(user)) : {},
+        status === 'NONE' ? { applications: { none: {} } } : {},
+        Object.keys(app).length ? { applications: { some: app } } : {},
+        source ? { source } : {},
+        created.gte || created.lt ? { createdAt: created } : {},
       ],
     };
+  }
+
+  async list(query: QueryCandidatesDto, user: JwtUser) {
+    const { page = 1, pageSize = 20 } = query;
+    const where = this.filterWhere(query, user);
     const [total, items] = await this.prisma.$transaction([
       this.prisma.candidate.count({ where }),
       this.prisma.candidate.findMany({
@@ -145,6 +180,80 @@ export class CandidatesService {
       }),
     ]);
     return { total, page, pageSize, items: items.map((c) => this.maskContact(c, user)) };
+  }
+
+  /** 列表中出现过的来源渠道（筛选下拉用） */
+  async sources(user: JwtUser) {
+    const rows = await this.prisma.candidate.findMany({
+      where: { AND: [this.candidateScopeWhere(user), { source: { not: null } }] },
+      distinct: ['source'],
+      select: { source: true },
+      orderBy: { source: 'asc' },
+      take: 100,
+    });
+    return rows.map((r) => r.source).filter((s): s is string => Boolean(s));
+  }
+
+  /**
+   * 按当前筛选导出 Excel。联系方式与列表同一脱敏口径；单次最多 EXPORT_LIMIT 行，超出提示缩小范围。
+   * 导出动作记入审计（含筛选条件与行数），不记具体名单。
+   */
+  async exportXlsx(query: CandidateFilterDto, user: JwtUser): Promise<{ buffer: Buffer; fileName: string; rows: number }> {
+    const where = this.filterWhere(query, user);
+    const total = await this.prisma.candidate.count({ where });
+    if (total > EXPORT_LIMIT) {
+      throw new BadRequestException(`符合条件的候选人有 ${total} 人，单次最多导出 ${EXPORT_LIMIT} 人，请缩小筛选范围`);
+    }
+    const items = await this.prisma.candidate.findMany({
+      where,
+      include: {
+        applications: {
+          include: { job: { select: { title: true } }, stage: { select: { name: true } } },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    const ExcelJS = (await import('exceljs')).default;
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'HireFlow 招聘';
+    const sheet = workbook.addWorksheet('候选人');
+    sheet.columns = [
+      { header: '姓名', key: 'name', width: 12 },
+      { header: '邮箱', key: 'email', width: 26 },
+      { header: '手机号', key: 'phone', width: 16 },
+      { header: '来源', key: 'source', width: 12 },
+      { header: '技能标签', key: 'tags', width: 30 },
+      { header: '应聘职位', key: 'jobs', width: 24 },
+      { header: '当前阶段', key: 'stages', width: 14 },
+      { header: '应聘状态', key: 'statuses', width: 12 },
+      { header: '最高匹配分', key: 'score', width: 11 },
+      { header: '建档时间', key: 'createdAt', width: 18 },
+    ];
+    sheet.getRow(1).font = { bold: true };
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    for (const raw of items) {
+      const c = this.maskContact(raw, user);
+      const scores = c.applications.map((a) => a.matchScore).filter((n): n is number => n != null);
+      sheet.addRow({
+        name: c.name,
+        email: c.email ?? '',
+        phone: c.phone ?? '',
+        source: c.source ?? '',
+        tags: c.tags.join('、'),
+        jobs: c.applications.map((a) => a.job.title).join('；'),
+        stages: c.applications.map((a) => a.stage.name).join('；'),
+        statuses: c.applications.map((a) => APPLICATION_STATUS_LABEL[a.status] ?? a.status).join('；'),
+        score: scores.length ? Math.max(...scores) : null,
+        createdAt: formatBeijing(c.createdAt),
+      });
+    }
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    await this.activityLog.record(user, ACTIVITY_ACTIONS.CANDIDATES_EXPORTED, 'Candidate', 'export', {
+      rows: items.length,
+      filters: { ...query } as Prisma.InputJsonValue,
+    } as Prisma.InputJsonValue);
+    return { buffer, fileName: `候选人-${formatBeijing(new Date()).slice(0, 10)}.xlsx`, rows: items.length };
   }
 
   async create(dto: CreateCandidateDto, user: JwtUser) {
@@ -212,14 +321,28 @@ export class CandidatesService {
     });
     if (!candidate) throw new NotFoundException('候选人不存在');
 
-    // 时间轴聚合：候选人自身 + 其所有应聘记录的留痕
+    // 时间轴聚合：候选人自身 + 其所有应聘记录的留痕 + 作用在他身上的 Copilot 操作（确认 / 取消 / 失败）
     const applicationIds = candidate.applications.map((a) => a.id);
+    const copilotActions = await this.prisma.copilotAction.findMany({
+      where: {
+        status: { in: ['EXECUTED', 'REJECTED', 'FAILED'] },
+        OR: [
+          { args: { path: ['candidateId'], equals: id } },
+          ...applicationIds.map((appId) => ({ args: { path: ['applicationId'], equals: appId } })),
+        ],
+      },
+      select: { id: true },
+      take: 200,
+    });
     const timeline = await this.prisma.activityLog.findMany({
       where: {
         OR: [
           { entityType: 'Candidate', entityId: id },
           ...(applicationIds.length > 0
             ? [{ entityType: 'Application', entityId: { in: applicationIds } }]
+            : []),
+          ...(copilotActions.length > 0
+            ? [{ entityType: 'CopilotAction', entityId: { in: copilotActions.map((a) => a.id) } }]
             : []),
         ],
       },
@@ -354,8 +477,8 @@ export class CandidatesService {
   }
 
   /**
-   * 上传简历原件：原件入对象存储留档，PDF/文本自动抽取文字进入既有 AI 解析链路；
-   * 抽不出文字的格式（扫描件/Word）留档后由 HR 粘贴文本补充（人工兜底）。
+   * 上传简历原件：原件入对象存储留档，PDF/Word/文本自动抽取文字进入既有 AI 解析链路；
+   * 抽不出文字的格式（扫描件/.doc）留档后由 HR 粘贴文本补充（人工兜底）。
    */
   async addResumeFile(candidateId: string, file: Express.Multer.File, user: JwtUser) {
     await this.assertCandidateInScope(candidateId, user);
@@ -402,27 +525,14 @@ export class CandidatesService {
     return { url: await this.storage.presignedGetUrl(resume.fileKey, resume.fileName ?? undefined, 600, 'attachment') };
   }
 
-  /** PDF / 纯文本抽取文字；其余格式返回 null（留档不解析） */
+  /** PDF / Word（.docx）/ 纯文本抽取文字；其余格式返回 null（留档不解析） */
   private async extractText(buffer: Buffer, mimetype: string, fileName: string): Promise<string | null> {
+    if (!canExtractText(mimetype, fileName)) return null;
     try {
-      if (mimetype === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')) {
-        const { PDFParse } = await import('pdf-parse');
-        const parser = new PDFParse({ data: new Uint8Array(buffer) });
-        try {
-          const result = await parser.getText();
-          const text = result.text?.trim();
-          return text ? text.slice(0, 50_000) : null;
-        } finally {
-          await parser.destroy();
-        }
-      }
-      if (mimetype.startsWith('text/') || /\.(txt|md|markdown)$/i.test(fileName)) {
-        const text = buffer.toString('utf8').trim();
-        return text ? text.slice(0, 50_000) : null;
-      }
+      return await extractResumeText(buffer, mimetype, fileName);
     } catch (error) {
       this.logger.warn(`简历文字抽取失败（${fileName}）：${error instanceof Error ? error.message : error}`);
+      return null;
     }
-    return null;
   }
 }

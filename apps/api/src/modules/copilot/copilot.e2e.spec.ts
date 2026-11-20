@@ -5,6 +5,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { fork, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
+import { CandidatesService } from '../candidates/candidates.service';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { PrismaModule } from '../../prisma/prisma.module';
@@ -241,6 +242,9 @@ describe('Copilot SSE / 工具权限 / 待确认操作 端到端', () => {
     expect((await prisma.application.findUniqueOrThrow({ where: { id: 'a-zw' } })).stageId).toBe('s-fe-2');
     const audit = await prisma.activityLog.findFirst({ where: { action: ACTIVITY_ACTIONS.COPILOT_ACTION_EXECUTED, entityId: actions[0].id } });
     expect(audit).toBeTruthy();
+    // 候选人时间轴里能看到这次 Copilot 操作
+    const detail = await app.get(CandidatesService).findOne('c-zw', hr);
+    expect(detail.timeline.map((e) => e.action)).toContain(ACTIVITY_ACTIONS.COPILOT_ACTION_EXECUTED);
     expect((await json(`/copilot/actions/${actions[0].id}/confirm`, {})).status).toBe(409);
 
     // 下一轮模型能看到「用户已确认」

@@ -118,6 +118,32 @@ export interface Candidate {
   createdAt: string;
 }
 
+/** 候选人列表筛选（列表与导出共用；与后端 CandidateFilterDto 对应） */
+export interface CandidateFilters {
+  keyword?: string;
+  stage?: 'screening';
+  jobId?: string;
+  stageKind?: StageKind;
+  status?: ApplicationStatus | 'NONE';
+  source?: string;
+  minScore?: number;
+  createdFrom?: string;
+  createdTo?: string;
+}
+
+export interface IntakeResult {
+  candidate: { id: string; name: string };
+  created: boolean;
+  matchedBy: 'email' | 'phone' | null;
+  backfilled: string[];
+  resumeId: string;
+  parsed: boolean;
+  skills: string[];
+  application: { id: string; revived: boolean } | null;
+  score: number | null;
+  warnings: string[];
+}
+
 export interface Evaluation {
   id: string;
   interviewer: UserBrief;
