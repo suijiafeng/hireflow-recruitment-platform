@@ -65,6 +65,10 @@ export const ACTIVITY_ACTIONS = {
   DEPARTMENT_CREATED: 'department.created',
   DEPARTMENT_UPDATED: 'department.updated',
   DEPARTMENT_DELETED: 'department.deleted',
+  CANDIDATE_NOTE_ADDED: 'candidate.note_added',
+  COPILOT_ACTION_EXECUTED: 'copilot.action_executed',
+  COPILOT_ACTION_REJECTED: 'copilot.action_rejected',
+  COPILOT_ACTION_FAILED: 'copilot.action_failed',
 } as const;
 
 /** 入职三方待办清单默认模板，owner: HR / IT / NEW_HIRE */
