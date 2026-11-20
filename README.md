@@ -32,6 +32,7 @@
 - 面试排期和面评。候选人用免登录链接选时间、答复 Offer、提交入职材料。
 - 权限分两轴：能做什么，以及能看谁的数据（全部、本部门、仅指派、仅本人）。没有 `salary:view` 就看不到薪资。
 - 数据大盘和洞察：漏斗、渠道、面试官和招聘周期。
+- 页头的 **AI Copilot** 侧栏：用自然语言查候选人、看板、面试、Offer 和漏斗，也能起草推进阶段、安排面试、加备注、写面评草稿、淘汰——写操作都要人点确认才执行。
 - AI 网关负责 JD、简历解析、匹配、面评草稿和漏斗诊断。支持 Anthropic 和 OpenAI 兼容接口（DeepSeek、通义千问、本地 vLLM 等），没有模型 key 时走内置规则引擎。
 
 ## 技术栈
@@ -64,6 +65,55 @@ AI_MODEL="deepseek-chat"
 ```
 
 本地没有 key 也能演示真实的调用链路：`node apps/api/scripts/mock-llm.mjs` 会在 3311 端口启动一个同时兼容 Anthropic Messages 和 OpenAI Chat Completions 的模拟服务，把 `ANTHROPIC_BASE_URL` 或 `AI_BASE_URL` 指向它即可。
+
+## AI Copilot
+
+任何页面点页头的「Copilot」（或 Ctrl/⌘ + J）打开侧栏。在候选人抽屉、招聘看板里打开时，会自动关联当前候选人 / 职位，可以直接问「总结一下这位候选人」「这个职位卡在哪」。
+
+```mermaid
+flowchart LR
+  subgraph Web["前端（React）"]
+    P["Copilot 侧栏<br/>流式 Markdown · 工具步骤 · 确认卡片"]
+  end
+  subgraph API["NestJS · CopilotModule"]
+    C["POST /copilot/conversations/:id/messages<br/>SSE：meta / text / tool_start / tool_end / action / done"]
+    L["Agent 循环<br/>迭代 · 工具次数 · 超时 · 成本 · 预算上限"]
+    R["读工具<br/>search_candidates · get_candidate · job_pipeline<br/>upcoming_interviews · offer_status · funnel_insights …"]
+    W["写工具（只提议）<br/>move_candidate_stage · schedule_interview<br/>add_candidate_note · draft_evaluation · reject_application"]
+    A["POST /copilot/actions/:id/confirm<br/>按此刻权限 + 乐观锁重新执行 · 审计日志"]
+  end
+  S["现有业务服务<br/>候选人 / 看板 / 面试 / Offer / 报表<br/>（当前用户的权限点与数据范围）"]
+  M["模型<br/>Anthropic · OpenAI 兼容 · 规则引擎"]
+  DB[("PostgreSQL<br/>CopilotConversation / Message / Action<br/>AiCallLog（含 userId）")]
+  P -- "fetch + SSE（停止 = 断开）" --> C --> L
+  L <--> M
+  L --> R --> S
+  L --> W -- "PENDING 操作" --> DB
+  P -- "用户点确认" --> A --> S
+  L --> DB
+```
+
+- **数据范围跟人走**：读工具直接调用现有业务服务并传入当前用户，模型看到的数据和这个人在页面上能看到的一样多。面试官只能查到被指派的候选人和面试，用人经理只能看本部门；没有对应权限的工具根本不会出现在工具列表里。
+- **写操作必须人确认**：模型调用写工具只会生成一张待确认卡片（参数已解析好，记下当时的版本号），不会执行任何写入。用户点确认后，后端以**确认那一刻**的权限重新走业务服务：权限被收回返回 403，期间卡片被别人移动过返回 409，重复确认返回 409，过期返回 410；执行、取消、失败都写审计日志。面评草稿确认后只保存为本人的草稿，仍需在面评表单里核对后提交。
+- **没有删除类工具**：Copilot 只能新建或修改，删除只能由人在界面上手动操作。
+- **不可信内容隔离**：工具结果里的简历、面评、备注等候选人文本沿用 AI 管线的注入防护——检测注入特征、转义、加 `<untrusted_…>` 边界标签、脱敏联系方式；疑似注入时附带告警，回答里提示人工复核。写操作只能由用户在对话里提出。
+- **流式与中止**：SSE 每 15 秒发心跳，响应头带 `X-Accel-Buffering: no`（nginx 不缓冲）。点「停止」或关页面即断开连接，后端中止模型请求和后续工具调用，已生成的部分保存并标记为已停止。
+- **上限与降级**：每轮最多 5 次迭代、8 次工具调用，90 秒超时，单轮成本上限，每人每日 token 预算，每分钟 12 次、同一账号同时只生成一条。模型不可用且还没输出时自动降级到规则引擎，来源标签显示「规则」。每轮用量写入 `AiCallLog`（`capability = copilot`，带 `userId`）。
+- **无 key 也能完整演示**：规则引擎版 Copilot 支持流式和多步工具调用；`scripts/mock-llm.mjs` 也能按 Anthropic / OpenAI 的流式协议回放工具调用，用来验证真实 SDK 的解析链路。
+
+相关变量（都有默认值）：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `COPILOT_PROVIDER` | 跟随 `AI_PROVIDER` | 设为 `mock` 时只让 Copilot 用规则引擎 |
+| `COPILOT_MODEL` | `ANTHROPIC_MODEL_FAST` / `AI_MODEL` | Copilot 使用的模型 |
+| `COPILOT_MAX_ITERATIONS` / `COPILOT_MAX_TOOL_CALLS` | 5 / 8 | 每轮迭代与工具调用上限 |
+| `COPILOT_TIMEOUT_MS` / `COPILOT_MAX_OUTPUT_TOKENS` | 90000 / 1500 | 单轮超时、单次输出上限 |
+| `COPILOT_TURN_MAX_COST_USD` / `COPILOT_DAILY_TOKEN_BUDGET` | 0.1 / 400000 | 单轮成本上限、每人每日 token 预算 |
+| `COPILOT_RATE_PER_MIN` | 12 | 每人每分钟提问次数 |
+| `COPILOT_HEARTBEAT_MS` / `COPILOT_ACTION_TTL_MIN` | 15000 / 30 | SSE 心跳、待确认操作有效期 |
+
+限流计数在进程内存里，多实例部署时每个实例各算各的。
 
 ## 本地运行
 
