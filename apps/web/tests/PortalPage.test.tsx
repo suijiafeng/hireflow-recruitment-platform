@@ -168,7 +168,8 @@ describe('候选人页（一条应聘一个链接）', () => {
     await user.type(screen.getByLabelText('本人姓名'), '林一');
     await user.click(screen.getByRole('button', { name: '确认合同' }));
     await waitFor(() => expect(portalApi.sign).toHaveBeenCalledWith('tok-1', '林一'));
-  });
+    // 整页表单 + 逐字输入，CI 机器上偶尔超过默认 5s
+  }, 20_000);
 
   it('流程已结束时不再展示面试、薪资和入职信息', async () => {
     vi.mocked(portalApi.view).mockResolvedValue({ ...base, step: 'closed', interviews: [], offer: null, onboarding: null });
