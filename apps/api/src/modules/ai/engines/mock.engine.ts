@@ -122,7 +122,7 @@ export class MockAiEngine implements AiEngine {
     const summary = [
       top ? `候选人主攻 ${top}${years ? `，约 ${years} 年相关经验` : ''}。` : '简历中未识别出明确技能关键词。',
       skills.length >= 4 ? '技能覆盖面较广，与技术岗位匹配潜力较高。' : '技能信息较少，建议面试中重点验证实际深度。',
-      '（规则引擎解析结果，配置 ANTHROPIC_API_KEY 后可获得更准确的语义解析）',
+      '（规则引擎解析结果，接入大模型后可获得更准确的语义解析）',
     ].join('');
 
     return { summary, skills, educations, experiences };
@@ -201,7 +201,7 @@ export class MockAiEngine implements AiEngine {
     }
     const best = input.docs[0];
     const excerpt = best.content.replace(/\s+/g, ' ').slice(0, 220);
-    return `根据《${best.title}》：${excerpt}${best.content.length > 220 ? '……' : ''}（规则引擎按关键词检索作答，配置 ANTHROPIC_API_KEY 后可获得更准确的综合回答）`;
+    return `根据《${best.title}》：${excerpt}${best.content.length > 220 ? '……' : ''}（规则引擎按关键词检索作答，接入大模型后可获得更准确的综合回答）`;
   }
 
   async predictRetention(input: RetentionInput): Promise<RetentionHint> {

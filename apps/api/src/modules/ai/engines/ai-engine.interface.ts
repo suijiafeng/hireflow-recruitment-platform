@@ -14,6 +14,8 @@ export interface ParsedResume {
   skills: string[];
   educations: Array<{ school: string; degree?: string; major?: string }>;
   experiences: Array<{ company: string; title?: string; years?: string; highlights?: string }>;
+  /** 简历原文命中疑似指令注入特征（提示 HR 人工复核） */
+  injectionSuspected?: boolean;
 }
 
 /** 岗位匹配度评分（可解释，给出命中/缺失依据） */
@@ -24,6 +26,10 @@ export interface MatchResult {
   misses: string[];
   highlights: string;
   risks: string;
+  /** 经过原文核对的命中证据（LLM 引擎才有） */
+  evidence?: Array<{ requirement: string; quote: string }>;
+  /** 候选人材料命中疑似指令注入特征，分数已封顶 */
+  injectionSuspected?: boolean;
 }
 
 /** 面评草稿 */
