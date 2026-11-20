@@ -421,7 +421,12 @@ function MembersSection() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteForm] = Form.useForm<InviteUserInput>();
   /** 初始密码仅在邀请响应里返回一次，拿到后必须让管理员当场转交 */
-  const [issued, setIssued] = useState<{ name: string; email: string; password: string } | null>(null);
+  const [issued, setIssued] = useState<{
+    name: string;
+    email: string;
+    password: string;
+    kind: 'invite' | 'reset';
+  } | null>(null);
 
   const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => usersApi.list() });
   // 邀请弹窗也要用角色列表，不能只在编辑时才拉
@@ -434,7 +439,7 @@ function MembersSection() {
     onSuccess: ({ user, initialPassword }) => {
       setInviteOpen(false);
       inviteForm.resetFields();
-      setIssued({ name: user.name, email: user.email, password: initialPassword });
+      setIssued({ name: user.name, email: user.email, password: initialPassword, kind: 'invite' });
       void queryClient.invalidateQueries({ queryKey: ['users'] });
       void queryClient.invalidateQueries({ queryKey: ['roles'] });
       void queryClient.invalidateQueries({ queryKey: ['audit'] });
@@ -470,6 +475,15 @@ function MembersSection() {
       }
     },
     onError: (error) => message.error(extractErrorMessage(error, '操作失败')),
+  });
+
+  const resetMutation = useMutation({
+    mutationFn: (u: UserItem) => usersApi.resetPassword(u.id).then((r) => ({ ...r, user: u })),
+    onSuccess: ({ temporaryPassword, user }) => {
+      setIssued({ name: user.name, email: user.email, password: temporaryPassword, kind: 'reset' });
+      void queryClient.invalidateQueries({ queryKey: ['audit'] });
+    },
+    onError: (error) => message.error(extractErrorMessage(error, '重置失败')),
   });
 
   const saveMutation = useMutation({
@@ -534,14 +548,25 @@ function MembersSection() {
     {
       title: '操作',
       key: 'action',
-      width: 110,
+      width: 190,
       align: 'right',
       fixed: 'right',
       render: (_, u) => (
-        <span className="u-flex-end u-flex-gap-12">
+        <span className="u-flex-end u-flex-gap-12 hf-row-acts">
           <span className="hf-link" {...pressable(() => setEditing(u))}>
             分配角色
           </span>
+          {u.id !== me?.id && u.status === 'ACTIVE' && (
+            <Popconfirm
+              title={`重置 ${u.name} 的密码？`}
+              description="将生成一次性临时密码，TA 所有已登录的设备会立即退出。"
+              okText="重置"
+              cancelText="取消"
+              onConfirm={() => resetMutation.mutate(u)}
+            >
+              <span className="hf-link">重置密码</span>
+            </Popconfirm>
+          )}
           {u.id !== me?.id &&
             (u.status === 'ACTIVE' ? (
               <Popconfirm
@@ -702,7 +727,7 @@ function MembersSection() {
       {/* 初始密码只在此刻拿得到，关掉就再也查不到——必须说清楚并给复制 */}
       <Modal
         className="hf-modal"
-        title="账号已创建"
+        title={issued?.kind === 'reset' ? '密码已重置' : '账号已创建'}
         open={Boolean(issued)}
         onCancel={() => setIssued(null)}
         okText="我已转交，关闭"
@@ -712,7 +737,11 @@ function MembersSection() {
       >
         <div className="hf-notice hf-notice--warn u-mb-16">
           <WarningOutlined />
-          <span>初始密码只显示这一次，关闭后无法再查看（系统不保存明文）。请立即转交本人，并提醒其登录后尽快修改。</span>
+          <span>
+            {issued?.kind === 'reset' ? '临时密码' : '初始密码'}
+            只显示这一次，关闭后无法再查看（系统不保存明文）。请立即转交本人，并提醒其登录后在右上角「修改密码」。
+            {issued?.kind === 'reset' && 'TA 之前登录的所有设备已退出。'}
+          </span>
         </div>
         <div className="hf-kv">
           <span className="hf-kv-k">姓名</span>
@@ -723,7 +752,7 @@ function MembersSection() {
           <span className="hf-kv-v hf-mono">{issued?.email}</span>
         </div>
         <div className="hf-kv">
-          <span className="hf-kv-k">初始密码</span>
+          <span className="hf-kv-k">{issued?.kind === 'reset' ? '临时密码' : '初始密码'}</span>
           <span className="hf-kv-v">
             <Typography.Text copyable strong className="hf-mono">
               {issued?.password}

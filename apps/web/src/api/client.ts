@@ -4,6 +4,9 @@ import { loginUrlFor } from '../utils/redirect';
 
 export const http = axios.create({ baseURL: '/api', timeout: 15_000 });
 
+/** 被动登出原因（令牌被吊销等），登录页读取一次后清除 */
+export const LOGOUT_REASON_KEY = 'hireflow-logout-reason';
+
 /**
  * AI 接口单独的超时：后端单次 AI 调用（含排队）最长 AI_DEADLINE_MS（默认 40s）后一定返回（超时即降级），
  * 前端必须比它长，否则会出现「前端报失败、后端其实成功」。人才库唤醒是批量调用，后端整体预算约 85s。
@@ -22,6 +25,15 @@ http.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      // 已登录状态下被拒（令牌被吊销 / 过期）：把原因带到登录页，而不是无声地踢回去
+      if (useAuthStore.getState().token) {
+        const reason = extractErrorMessage(error, '登录已失效，请重新登录');
+        try {
+          sessionStorage.setItem(LOGOUT_REASON_KEY, reason);
+        } catch {
+          /* 隐私模式等不可写时忽略 */
+        }
+      }
       useAuthStore.getState().logout();
       // 令牌过期：带上当前页面，重新登录后回到原处，而不是被扔回首页
       if (window.location.pathname !== '/login') {

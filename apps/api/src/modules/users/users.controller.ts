@@ -41,6 +41,16 @@ export class UsersController {
     return this.usersService.setStatus(id, dto.status, user);
   }
 
+  @Post(':id/reset-password')
+  @RequirePermissions(PERMISSIONS.USER_MANAGE)
+  @ApiOperation({
+    summary: '重置成员密码',
+    description: '返回一次性临时密码（仅此一次，不写入审计）；该成员所有已登录会话立即失效。',
+  })
+  resetPassword(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    return this.usersService.resetPassword(id, user);
+  }
+
   @Patch(':id/roles')
   @RequirePermissions(PERMISSIONS.USER_MANAGE)
   @ApiOperation({ summary: '更新用户角色（全量替换；下一次请求即生效）' })

@@ -85,16 +85,19 @@ enum EvaluationConclusion {
 }
 
 model User {
-  id           String      @id @default(cuid())
-  email        String      @unique
-  passwordHash String
-  name         String
-  status       UserStatus  @default(ACTIVE)
-  departmentId String?
-  department   Department? @relation(fields: [departmentId], references: [id])
-  roles        UserRole[]
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id                String      @id @default(cuid())
+  email             String      @unique
+  passwordHash      String
+  name              String
+  status            UserStatus  @default(ACTIVE)
+  /// 令牌版本：改密 / 重置密码 / 停用时 +1，签发时写进 JWT（tv），鉴权比对不一致即视为已吊销
+  tokenVersion      Int         @default(0)
+  passwordChangedAt DateTime?
+  departmentId      String?
+  department        Department? @relation(fields: [departmentId], references: [id])
+  roles             UserRole[]
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
   activityLogs      ActivityLog[]
   hiringManagerJobs Job[]                  @relation("JobHiringManager")
@@ -152,23 +155,23 @@ model Department {
 }
 
 model Job {
-  id              String     @id @default(cuid())
-  title           String
-  description     String?
-  requirement     String?
-  headcount       Int        @default(1)
-  status          JobStatus  @default(DRAFT)
-  departmentId    String
-  department      Department @relation(fields: [departmentId], references: [id])
-  hiringManagerId String?
-  hiringManager   User?      @relation("JobHiringManager", fields: [hiringManagerId], references: [id])
-  createdById     String
-  createdBy       User       @relation("JobCreatedBy", fields: [createdById], references: [id])
-  stages          PipelineStage[]
-  applications    Application[]
+  id                String          @id @default(cuid())
+  title             String
+  description       String?
+  requirement       String?
+  headcount         Int             @default(1)
+  status            JobStatus       @default(DRAFT)
+  departmentId      String
+  department        Department      @relation(fields: [departmentId], references: [id])
+  hiringManagerId   String?
+  hiringManager     User?           @relation("JobHiringManager", fields: [hiringManagerId], references: [id])
+  createdById       String
+  createdBy         User            @relation("JobCreatedBy", fields: [createdById], references: [id])
+  stages            PipelineStage[]
+  applications      Application[]
   scorecardTemplate Json? // 岗位级评分卡模板 [{dimension, weight}]（空则用全局默认）
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 }
 
 // 每个职位可自定义的招聘阶段（Pipeline Builder）
@@ -213,48 +216,50 @@ model Resume {
 
 // 应聘记录：连接 Candidate 与 Job，驱动 Pipeline
 model Application {
-  id             String            @id @default(cuid())
-  candidateId    String
-  candidate      Candidate         @relation(fields: [candidateId], references: [id])
-  jobId          String
-  job            Job               @relation(fields: [jobId], references: [id])
-  stageId        String
-  stage          PipelineStage     @relation(fields: [stageId], references: [id])
-  status         ApplicationStatus @default(ACTIVE)
-  matchScore     Int? // AI 匹配度分数（二期）
-  matchReport    Json? // 打分依据（二期）
-  matchSource    String? // 分数口径：ai = 大模型评分；rule = 规则引擎（未配模型或降级），列表/看板据此标注
-  position       Float             @default(0) // 看板列内排序
-  stageEnteredAt DateTime          @default(now()) // 进入当前阶段时间（停留时长/SLA）
-  version        Int               @default(0) // 乐观锁：并发拖卡冲突检测
-  rejectReason   String? // 淘汰/撤回原因码（原因码强制）
-  prescreen      Json? // AI 预筛问答（薪资/到岗/出差 + 提交时间 + 硬性条件核验结果）
-  prescreenToken String?           @unique // 预筛免登录 H5 令牌
-  interviews     Interview[]
-  offer          Offer?
-  onboarding     Onboarding?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  id                 String            @id @default(cuid())
+  candidateId        String
+  candidate          Candidate         @relation(fields: [candidateId], references: [id])
+  jobId              String
+  job                Job               @relation(fields: [jobId], references: [id])
+  stageId            String
+  stage              PipelineStage     @relation(fields: [stageId], references: [id])
+  status             ApplicationStatus @default(ACTIVE)
+  matchScore         Int? // AI 匹配度分数（二期）
+  matchReport        Json? // 打分依据（二期）
+  matchSource        String? // 分数口径：ai = 大模型评分；rule = 规则引擎（未配模型或降级），列表/看板据此标注
+  position           Float             @default(0) // 看板列内排序
+  stageEnteredAt     DateTime          @default(now()) // 进入当前阶段时间（停留时长/SLA）
+  version            Int               @default(0) // 乐观锁：并发拖卡冲突检测
+  rejectReason       String? // 淘汰/撤回原因码（原因码强制）
+  prescreen          Json? // AI 预筛问答（薪资/到岗/出差 + 提交时间 + 硬性条件核验结果）
+  prescreenToken     String?           @unique // 预筛免登录 H5 令牌
+  prescreenExpiresAt DateTime? // 预筛链接硬过期时间（过期后打开显示「链接已过期」，重新发送会换新令牌）
+  interviews         Interview[]
+  offer              Offer?
+  onboarding         Onboarding?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
 
   @@unique([candidateId, jobId])
   @@index([jobId, stageId])
 }
 
 model Interview {
-  id            String                 @id @default(cuid())
-  applicationId String
-  application   Application            @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  round         Int
-  scheduledAt   DateTime?
-  durationMins  Int?
-  location      String?
-  meetingUrl    String?
-  status        InterviewStatus        @default(SCHEDULED)
-  transcript    Json? // 面试 Copilot 转写（二期）
-  portalToken   String?                @unique // 候选人自助选时 H5 令牌
-  interviewers  InterviewInterviewer[]
-  evaluations   Evaluation[]
-  createdAt     DateTime               @default(now())
+  id              String                 @id @default(cuid())
+  applicationId   String
+  application     Application            @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  round           Int
+  scheduledAt     DateTime?
+  durationMins    Int?
+  location        String?
+  meetingUrl      String?
+  status          InterviewStatus        @default(SCHEDULED)
+  transcript      Json? // 面试 Copilot 转写（二期）
+  portalToken     String?                @unique // 候选人自助选时 H5 令牌
+  portalExpiresAt DateTime? // 选时链接硬过期时间
+  interviewers    InterviewInterviewer[]
+  evaluations     Evaluation[]
+  createdAt       DateTime               @default(now())
 }
 
 // 面试官可约时段（无外部日历集成时的系统内空闲档）
@@ -327,37 +332,39 @@ model Evaluation {
 }
 
 model Offer {
-  id             String              @id @default(cuid())
-  applicationId  String              @unique
-  application    Application         @relation(fields: [applicationId], references: [id])
-  salary         Json? // 敏感字段：薪资结构（RBAC salary:view 控制）
-  grade          String?
-  startDate      DateTime?           @db.Date // 预计入职日期（随 Offer 审批，进合同与门户）
-  approvalStatus OfferApprovalStatus @default(DRAFT)
-  approvalNote   String? // 审批意见（驳回带意见退回 HR 修改重提）
-  sentAt         DateTime?
-  expiresAt      DateTime? // 答复截止（发送时 +5 个工作日）
-  extendedOnce   Boolean             @default(false) // 有效期仅可续期一次
-  portalToken    String?             @unique // 候选人免登录 H5 令牌
-  respondedAt    DateTime?
-  decision       OfferDecision?
-  decisionReason String? // 候选人拒绝原因码
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  id              String              @id @default(cuid())
+  applicationId   String              @unique
+  application     Application         @relation(fields: [applicationId], references: [id])
+  salary          Json? // 敏感字段：薪资结构（RBAC salary:view 控制）
+  grade           String?
+  startDate       DateTime?           @db.Date // 预计入职日期（随 Offer 审批，进合同与门户）
+  approvalStatus  OfferApprovalStatus @default(DRAFT)
+  approvalNote    String? // 审批意见（驳回带意见退回 HR 修改重提）
+  sentAt          DateTime?
+  expiresAt       DateTime? // 答复截止（发送时 +5 个工作日）
+  extendedOnce    Boolean             @default(false) // 有效期仅可续期一次
+  portalToken     String?             @unique // 候选人免登录 H5 令牌
+  portalExpiresAt DateTime? // 门户链接硬过期时间（晚于答复截止 expiresAt，答复后再留一段查看期）
+  respondedAt     DateTime?
+  decision        OfferDecision?
+  decisionReason  String? // 候选人拒绝原因码
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 }
 
 model Onboarding {
-  id            String           @id @default(cuid())
-  applicationId String           @unique
-  application   Application      @relation(fields: [applicationId], references: [id])
-  checklist     Json? // 三方待办清单（HR/IT/新员工）
-  documents     Json? // 已收集材料
-  ocrResults    Json? // OCR 识别结果
-  status        OnboardingStatus @default(NOT_STARTED)
-  portalToken   String?          @unique // 新员工免登录 H5 令牌
-  contract      Contract?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  id              String           @id @default(cuid())
+  applicationId   String           @unique
+  application     Application      @relation(fields: [applicationId], references: [id])
+  checklist       Json? // 三方待办清单（HR/IT/新员工）
+  documents       Json? // 已收集材料
+  ocrResults      Json? // OCR 识别结果
+  status          OnboardingStatus @default(NOT_STARTED)
+  portalToken     String?          @unique // 新员工免登录 H5 令牌
+  portalExpiresAt DateTime? // 新员工门户硬过期时间
+  contract        Contract?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 }
 
 model Contract {
