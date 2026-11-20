@@ -8,11 +8,10 @@ import { pressable } from '../utils/pressable';
  * 默认折叠成卡片底部一行灰字，不抢正式登录的视线。
  */
 export const DEMO_ACCOUNTS = [
-  { email: 'admin@arthr.local', role: '系统管理员' },
-  { email: 'hr@arthr.local', role: 'HR / 招聘专员' },
-  { email: 'manager@arthr.local', role: '用人经理' },
-  { email: 'interviewer@arthr.local', role: '面试官' },
-  { email: 'it@arthr.local', role: 'IT / 行政' },
+  { email: 'admin@hireflow.local', role: '系统管理员' },
+  { email: 'hr@hireflow.local', role: 'HR / 招聘专员' },
+  { email: 'manager@hireflow.local', role: '用人经理' },
+  { email: 'interviewer@hireflow.local', role: '面试官' },
 ];
 export const DEMO_PASSWORD = 'Admin@123456';
 

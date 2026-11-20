@@ -36,10 +36,8 @@ const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 const DATA_SCOPE_LABEL: Record<string, string> = {
   ALL: '全部数据',
   DEPARTMENT: '本部门',
-  OWN: '仅本人',
   ASSIGNED: '仅被指派',
 };
-const PORTAL_ROLE_CODES: string[] = [RoleCode.CANDIDATE, RoleCode.NEW_HIRE];
 
 type Section = 'roles' | 'members' | 'depts' | 'docs' | 'audit' | 'ai';
 
@@ -432,7 +430,7 @@ function MembersSection() {
   // 邀请弹窗也要用角色列表，不能只在编辑时才拉
   const rolesQuery = useQuery({ queryKey: ['roles'], queryFn: rbacApi.roles, enabled: !!editing || inviteOpen });
   const departmentsQuery = useQuery({ queryKey: ['departments'], queryFn: departmentsApi.list, enabled: inviteOpen });
-  const internalRoles = (rolesQuery.data ?? []).filter((r) => !PORTAL_ROLE_CODES.includes(r.code));
+  const internalRoles = rolesQuery.data ?? [];
 
   const inviteMutation = useMutation({
     mutationFn: (values: InviteUserInput) => usersApi.invite(values),
@@ -458,14 +456,14 @@ function MembersSection() {
       void queryClient.invalidateQueries({ queryKey: ['users'] });
       void queryClient.invalidateQueries({ queryKey: ['audit'] });
       if (status === 'ACTIVE') return message.success('账号已启用');
-      // 离职的人手上还挂着职位：审批通知会按兜底规则另找人，但职位本身该换负责人
+      // 离职的人手上还挂着职位：职位本身该换负责人
       if (data.openJobs.length > 0) {
         modal.warning({
           title: '账号已停用，但仍是以下职位的用人经理',
           content: (
             <>
               <div className="u-mb-8">{data.openJobs.map((j) => j.title).join('、')}</div>
-              <div className="hf-muted">请到「职位管理」为这些职位改选在职的用人经理；在此之前相关审批会通知其上级或管理员。</div>
+              <div className="hf-muted">请到「看板 › 职位」为这些职位改选在职的用人经理。</div>
             </>
           ),
           okText: '知道了',
@@ -691,7 +689,7 @@ function MembersSection() {
               { type: 'email', message: '邮箱格式不正确' },
             ]}
           >
-            <Input placeholder="name@arthr.local" />
+            <Input placeholder="name@hireflow.local" />
           </Form.Item>
           <Form.Item name="name" label="姓名" rules={[{ required: true, message: '请填写姓名' }]}>
             <Input maxLength={40} />

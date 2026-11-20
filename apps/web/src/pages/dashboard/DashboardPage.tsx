@@ -1,18 +1,19 @@
 import { ReloadOutlined, RobotOutlined } from '@ant-design/icons';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { App, Button, Card, Select, Spin, Tooltip, Typography } from 'antd';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import dayjs from 'dayjs';
 import { analyticsApi, jobsApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import type { FunnelStage } from '../../api/types';
 import { ChartTip, SERIES, TrendChart } from '../../components/charts';
-import { AiSourceBadge, EmptyBlock } from '../../components/ui';
+import { EmptyBlock } from '../../components/ui';
 import { downloadCsv } from '../../utils/csv';
 import { pickDefaultJobId } from '../../utils/jobs';
 import { useUrlState } from '../../hooks/useUrlState';
 import { pressable } from '../../utils/pressable';
+import { useCopilotUi } from '../../copilot/store';
 
 /** 漏斗阶梯：越往后越深，同一墨色，不另开色相 */
 const FUNNEL_SHADES = ['#93C5FD', '#7DB1FB', '#60A5FA', '#3B82F6', '#2563EB', '#1E40AF'];
@@ -172,11 +173,9 @@ function FunnelBody({
 const TODO_META = [
   { key: 'newResumes' as const, label: '待处理新简历', link: '/candidates?stage=screening' },
   { key: 'myPendingEvaluations' as const, label: '我的待提交面评', link: '/interviews?tab=mine' },
-  { key: 'pendingOffers' as const, label: '待审批 Offer', link: '/offers?tab=approve' },
-  { key: 'rejectedOffers' as const, label: '被驳回待重提', link: '/offers' },
   { key: 'offersDue' as const, label: 'Offer 到期待处理', link: '/offers?tab=reply' },
-  { key: 'onboardingInProgress' as const, label: '进行中入职单', link: '/onboarding' },
-  { key: 'docsNeedReview' as const, label: '材料待人工核对', link: '/onboarding?tab=review' },
+  { key: 'onboardingInProgress' as const, label: '入职中', link: '/onboarding' },
+  { key: 'onboardingReady' as const, label: '资料已齐待确认入职', link: '/onboarding?tab=ready' },
 ];
 
 /** 待办：单行清单（数字在前、标签在后），替代原来占两行的 7 张磁贴 */
@@ -211,7 +210,7 @@ export function DashboardPage() {
   const [jobParam, setJobParam] = useUrlState<string>('job', '');
   const jobId = jobParam || undefined;
   const setJobId = (v?: string) => setJobParam(v ?? '');
-  const [insight, setInsight] = useState<{ text: string; provider: string; at: string } | null>(null);
+  const openCopilot = useCopilotUi((s) => s.openPanel);
 
   const jobsQuery = useQuery({
     queryKey: ['jobs', 'options'],
@@ -234,12 +233,6 @@ export function DashboardPage() {
   });
   const trendQuery = useQuery({ queryKey: ['trend'], queryFn: analyticsApi.trend });
   const todosQuery = useQuery({ queryKey: ['todos'], queryFn: analyticsApi.todos });
-
-  const insightMutation = useMutation({
-    mutationFn: () => analyticsApi.insight(jobId!),
-    onSuccess: (data) => setInsight({ text: data.insight, provider: data.aiMeta.provider, at: dayjs().format('HH:mm') }),
-    onError: (error) => message.error(extractErrorMessage(error, '诊断失败')),
-  });
 
   const stages = funnelQuery.data?.stages ?? [];
   const maxReached = Math.max(...stages.map((s) => s.reached), 1);
@@ -304,10 +297,7 @@ export function DashboardPage() {
             placeholder="选择职位"
             loading={jobsQuery.isLoading}
             value={jobId}
-            onChange={(v) => {
-              setJobId(v);
-              setInsight(null);
-            }}
+            onChange={(v) => setJobId(v)}
             options={jobOptions}
           />
           <span className="dashboard-updated">
@@ -389,34 +379,24 @@ export function DashboardPage() {
                   <RobotOutlined className="panel-title-icon" />
                   AI 健康度诊断
                 </span>
-                <span className="panel-head-right">
-                  {insight && (
-                    <span className="panel-note u-flex-gap-8 u-flex-center-v">
-                      <AiSourceBadge meta={{ provider: insight.provider }} note="诊断仅供参考" />
-                      {insight.at}
-                    </span>
-                  )}
-                  <Button
-                    size="small"
-                    loading={insightMutation.isPending}
-                    disabled={!jobId}
-                    onClick={() => insightMutation.mutate()}
-                  >
-                    {insight ? '重新生成' : '生成诊断'}
-                  </Button>
-                </span>
               </div>
               <div className="panel-body">
-                {insight ? (
-                  <>
-                    <div className="ai-insight-text">{insight.text}</div>
-                    <Typography.Text type="secondary" className="ai-insight-meta">
-                      AI 仅给出依据与建议，决定权在用人经理。
-                    </Typography.Text>
-                  </>
-                ) : (
-                  <EmptyBlock minHeight={140} description="选择职位后点「生成诊断」，按当前漏斗写出瓶颈和建议" />
-                )}
+                <div className="ai-insight-text">
+                  漏斗诊断已并入 Copilot：它会读取当前职位的漏斗数据，指出卡点并给出建议，还能继续追问。
+                </div>
+                <Button
+                  className="u-mt-12"
+                  disabled={!jobId}
+                  icon={<RobotOutlined />}
+                  onClick={() =>
+                    openCopilot({ prompt: `诊断「${jobsQuery.data?.items.find((j) => j.id === jobId)?.title ?? '当前职位'}」的招聘漏斗，指出卡点并给出建议` })
+                  }
+                >
+                  让 Copilot 诊断这个职位
+                </Button>
+                <Typography.Text type="secondary" className="ai-insight-meta">
+                  AI 仅给出依据与建议，决定权在用人经理。
+                </Typography.Text>
               </div>
             </Card>
           </div>

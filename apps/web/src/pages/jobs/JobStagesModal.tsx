@@ -14,7 +14,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
-import { PERMISSIONS } from '@hireflow/shared';
+import { PERMISSIONS, STAGE_KIND_LABEL, StageKind } from '@hireflow/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Input, Space, Spin, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
@@ -28,6 +28,7 @@ import { useAppDialogs } from '../../hooks/useAppDialogs';
 
 interface DraftStage extends JobStageInput {
   key: string;
+  kind: StageKind;
   applications: number;
 }
 
@@ -36,6 +37,7 @@ const draftOf = (stages: JobStage[]): DraftStage[] =>
     key: stage.id,
     id: stage.id,
     name: stage.name,
+    kind: stage.kind,
     applications: stage._count.applications,
   }));
 const payloadOf = (stages: DraftStage[]): JobStageInput[] =>
@@ -63,8 +65,10 @@ function StageRow({
 }) {
   const drag = useDraggable({ id: stage.key, disabled });
   const drop = useDroppable({ id: stage.key, disabled });
-  const deleteReason =
-    stage.applications > 0
+  const system = stage.kind !== StageKind.CUSTOM;
+  const deleteReason = system
+    ? '系统阶段：自动流转按它判断，可以改名，不能删除'
+    : stage.applications > 0
       ? `仍有 ${stage.applications} 条应聘记录，请先在看板移出候选人`
       : total <= 1
         ? '至少保留一个阶段'
@@ -98,6 +102,7 @@ function StageRow({
             onChange={(event) => onName(event.target.value)}
           />
           <Typography.Text type="secondary">
+            {system && <span className="hf-tag u-mr-4">系统 · {STAGE_KIND_LABEL[stage.kind]}</span>}
             {stage.id ? `${stage.applications} 条应聘记录` : '新增阶段，保存后生效'}
           </Typography.Text>
         </div>
@@ -276,8 +281,8 @@ export function JobStagesModal({ job, onClose }: { job: Job; onClose: () => void
       classNames={{ body: 'modal-body-scroll' }}
     >
       <Typography.Paragraph type="secondary">
-        从上到下为候选人流转顺序。拖动手柄或使用上移、下移按钮排序，保存后生效。
-        至少保留一个阶段；有应聘记录的阶段须先在看板移出候选人才能删除。
+        从上到下为候选人流转顺序，保存后生效。筛选 → 面试 → 录用 → 入职四个系统阶段驱动自动流转，
+        可以改名、可以在中间插入自定义阶段，但不能删除或调换先后；自定义阶段有应聘记录时须先移出候选人才能删除。
       </Typography.Paragraph>
       {!canManage && <Alert type="warning" showIcon title="当前账号已无配置招聘流程权限" />}
       {error && <Alert type="error" showIcon title={error} />}
@@ -327,7 +332,7 @@ export function JobStagesModal({ job, onClose }: { job: Job; onClose: () => void
             onClick={() =>
               setDraft((current) => [
                 ...current,
-                { key: `new:${crypto.randomUUID()}`, name: '', applications: 0 },
+                { key: `new:${crypto.randomUUID()}`, name: '', kind: StageKind.CUSTOM, applications: 0 },
               ])
             }
           >

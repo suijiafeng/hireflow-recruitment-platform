@@ -1,4 +1,4 @@
-import type { ApplicationStatus, JobStatus } from '@hireflow/shared';
+import type { ApplicationStatus, JobStatus, OfferStatus, StageKind } from '@hireflow/shared';
 
 export interface Paginated<T> {
   total: number;
@@ -10,7 +10,7 @@ export interface Paginated<T> {
 /** 职位列表顶部的口径：范围内全部职位，不随分页或状态页签缩小 */
 export interface JobListSummary {
   open: number;
-  pendingApproval: number;
+  draft: number;
   headcount: number;
   hcUsed: number;
   inFlow: number;
@@ -76,6 +76,7 @@ export interface JobStage {
   id: string;
   jobId: string;
   name: string;
+  kind: StageKind;
   order: number;
   _count: { applications: number };
 }
@@ -86,10 +87,19 @@ export interface JobStageInput {
   name: string;
 }
 
+/** 看板卡片上的面试轮次标签（最近一轮） */
+export interface InterviewTag {
+  round: number;
+  state: 'unscheduled' | 'scheduled' | 'awaiting_evaluation' | 'evaluated';
+  scheduledAt: string | null;
+  submitted: number;
+  total: number;
+}
+
 export interface CandidateApplicationBrief {
   id: string;
   job: { id: string; title: string };
-  stage: { id: string; name: string };
+  stage: { id: string; name: string; kind?: StageKind };
   status: ApplicationStatus;
   /** 候选人库列表用它显示匹配分；接口一直有返回，之前类型漏了 */
   matchScore?: number | null;
@@ -186,8 +196,7 @@ export interface DetailApplication {
   matchReport?: MatchReport | null;
   /** 终态应聘的淘汰原因码；接口一直有返回，之前类型漏了 */
   rejectReason?: string | null;
-  offer?: { id: string; approvalStatus: string; decision: string | null } | null;
-  prescreen?: PrescreenAnswers | null;
+  offer?: { id: string; status: OfferStatus; decision: string | null } | null;
   interviews: Interview[];
 }
 
@@ -300,18 +309,8 @@ export interface BoardCard {
   stageId: string;
   stageEnteredAt: string;
   version: number;
-  prescreen?: PrescreenAnswers | null;
+  interview?: InterviewTag | null;
   candidate: { id: string; name: string; tags: string[]; source: string | null };
-}
-
-/** 候选人在预筛门户填的三问 + 规则核验出的不符项 */
-export interface PrescreenAnswers {
-  expectedSalary: number;
-  availableDate: string;
-  travelOk: boolean;
-  note: string | null;
-  flags: string[];
-  submittedAt: string;
 }
 
 /**
@@ -334,8 +333,7 @@ export interface Offer {
   grade: string | null;
   /** 预计入职日期 YYYY-MM-DD（老数据可能为空） */
   startDate: string | null;
-  approvalStatus: string;
-  approvalNote: string | null;
+  status: OfferStatus;
   decision: string | null;
   decisionReason: string | null;
   sentAt: string | null;
@@ -352,102 +350,100 @@ export interface Offer {
   };
 }
 
-export interface RetentionHint {
-  probability: number;
-  factors: string[];
-  aiMeta: AiMeta;
-}
-
-export interface ChecklistItem {
-  key: string;
-  label: string;
-  owner: 'HR' | 'IT' | 'NEW_HIRE';
-  done: boolean;
-  doneAt: string | null;
-}
-
-export interface OnboardingDocument {
-  type: string;
-  label: string;
-  fields: Record<string, string>;
-  addedAt: string;
-  ocrProvider: string;
-  fileName?: string | null;
-  fileUrl?: string | null; // 原件预签名预览链接（10 分钟有效）
-  needsReview?: boolean; // 未识别出字段：待人工核对（低置信度阻断）
-  redacted?: boolean; // 当前角色无权查看证件字段（如 IT），fields 被服务端清空
-}
-
 export interface Contract {
   id: string;
   templateName: string | null;
   variables: Record<string, unknown> | null;
-  signStatus: string;
-  evidenceNo: string | null;
+  signStatus: 'PENDING' | 'SIGNED';
+  signedAt: string | null;
+  signerName: string | null;
 }
+
+export type OnboardingInfo = Record<string, string>;
 
 export interface Onboarding {
   id: string;
-  status: string;
-  checklist: ChecklistItem[];
-  documents: OnboardingDocument[] | null;
+  status: 'IN_PROGRESS' | 'COMPLETED';
+  info: OnboardingInfo | null;
+  infoSubmittedAt: string | null;
+  completedAt: string | null;
   contract: Contract | null;
-  progress: { done: number; total: number };
   createdAt: string;
   application: {
     id: string;
+    status: ApplicationStatus;
     candidate: { id: string; name: string; phone: string | null; email: string | null };
     job: { id: string; title: string; department: { name: string } };
   };
-}
-
-/** 候选人免登录 Offer 门户视图（/portal/offer/:token） */
-export interface OfferPortalView {
-  company: string;
-  candidateName: string;
-  jobTitle: string;
-  department: string;
-  status: string;
-  decision: string | null;
-  decisionReason: string | null;
-  respondedAt: string | null;
-  declineReasons: readonly string[];
-  /** 对接 HR（门户里「联系 HR」用） */
-  hrContact: { name: string; email: string } | null;
-  /** 议价/重提中：老链接不展示已撤回的薪资方案 */
-  preparing: boolean;
-  salary?: OfferSalary | null;
-  grade?: string | null;
+  /** 预计入职日期 YYYY-MM-DD */
   startDate?: string | null;
-  sentAt?: string | null;
-  expiresAt?: string | null;
-  extendedOnce?: boolean;
-  onboardingPortalToken?: string | null;
+  /** 无 onboarding:manage 时证件号等只给尾号 */
+  infoMasked?: boolean;
+  ready?: boolean;
 }
 
-/** 新员工免登录入职门户视图（/portal/onboarding/:token） */
-export interface OnboardingPortalView {
+export interface PortalSlot {
+  id: string;
+  startAt: string;
+  endAt: string;
+}
+
+/** 候选人页（/portal/:token）：一条应聘一个链接 */
+export interface PortalView {
   company: string;
   candidateName: string;
   jobTitle: string;
   department: string;
-  status: string;
-  checklist: ChecklistItem[];
-  documents: Array<{
-    type: string;
-    label: string;
-    fields: Record<string, string>;
-    addedAt: string;
-    needsReview?: boolean;
-    fileUrl?: string | null;
+  status: ApplicationStatus;
+  expiresAt: string | null;
+  hrContact: { name: string; email: string } | null;
+  step: 'interview' | 'offer' | 'onboarding' | 'hired' | 'closed';
+  interviews: Array<{
+    id: string;
+    round: number;
+    roundLabel: string;
+    durationMins: number;
+    scheduledAt: string | null;
+    meetingUrl: string | null;
+    location: string | null;
+    status: string;
+    interviewers: string[];
+    slots: PortalSlot[];
   }>;
-  contract: {
-    templateName: string | null;
-    signStatus: string;
-    variables: Record<string, unknown> | null;
-    evidenceNo: string | null;
+  offer:
+    | ({
+        status: OfferStatus;
+        decision: string | null;
+        decisionReason: string | null;
+        respondedAt: string | null;
+        declineReasons: readonly string[];
+      } & (
+        | { preparing: true }
+        | {
+            preparing: false;
+            salary: OfferSalary | null;
+            grade: string | null;
+            startDate: string | null;
+            sentAt: string | null;
+            expiresAt: string | null;
+            extendedOnce: boolean;
+          }
+      ))
+    | null;
+  onboarding: {
+    status: 'IN_PROGRESS' | 'COMPLETED';
+    fields: ReadonlyArray<{ key: string; label: string; sensitive: boolean }>;
+    info: OnboardingInfo | null;
+    infoSubmittedAt: string | null;
+    contract: {
+      templateName: string | null;
+      signStatus: 'PENDING' | 'SIGNED';
+      variables: Record<string, unknown> | null;
+      signedAt: string | null;
+      signerName: string | null;
+    } | null;
+    completedAt: string | null;
   } | null;
-  progress: { done: number; total: number };
 }
 
 export interface HelpdeskAnswer {
@@ -459,11 +455,9 @@ export interface HelpdeskAnswer {
 export interface TodoSummary {
   newResumes: number | null;
   myPendingEvaluations: number;
-  pendingOffers: number | null;
-  rejectedOffers: number | null;
   offersDue: number | null;
   onboardingInProgress: number | null;
-  docsNeedReview: number | null;
+  onboardingReady: number | null;
 }
 
 /** 面试官可约时段（自助选时） */
@@ -479,49 +473,8 @@ export interface InterviewerSlot {
   bookedRound: number | null;
 }
 
-export interface InterviewPortalView {
-  company: string;
-  candidateName: string;
-  jobTitle: string;
-  round: number;
-  durationMins: number;
-  scheduledAt: string | null;
-  status: string;
-  closed?: boolean;
-  slots: Array<{ id: string; startAt: string; endAt: string }>;
-}
-
-export interface PrescreenView {
-  company: string;
-  candidateName: string;
-  jobTitle: string;
-  prescreen: PrescreenAnswers | null;
-  /** 应聘已终结（淘汰 / 撤回 / 入职），问卷不再开放 */
-  closed?: boolean;
-}
-
-/** 候选人对比（2-4 人并排 + AI 综合意见） */
-export interface CompareData {
-  jobTitle: string;
-  candidates: Array<{
-    applicationId: string;
-    name: string;
-    matchScore: number | null;
-    tags: string[];
-    highlights: string | null;
-    risks: string | null;
-    evaluations: Array<{ conclusion: string | null; avgScore: number | null; comments: string | null }>;
-  }>;
-  ai: {
-    summary: string;
-    ranking: Array<{ name: string; rank: number; rationale: string }>;
-    risks: string;
-  };
-  aiMeta: AiMeta;
-}
-
 export interface BoardColumn {
-  stage: { id: string; name: string; order: number };
+  stage: { id: string; name: string; kind: StageKind; order: number };
   applications: BoardCard[];
 }
 
@@ -539,7 +492,7 @@ export type InsightsRange = '30d' | 'quarter' | 'year' | 'all';
 export interface CreateRoleInput {
   code: string;
   name: string;
-  dataScope?: 'ALL' | 'DEPARTMENT' | 'OWN' | 'ASSIGNED';
+  dataScope?: 'ALL' | 'DEPARTMENT' | 'ASSIGNED';
   permissions?: string[];
 }
 

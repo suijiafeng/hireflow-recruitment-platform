@@ -26,18 +26,16 @@ const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
 const PAGE_SIZE = 20;
 
-/** 状态色点：招聘中正向 / 暂停预警 / 待审批主色 / 草稿与关闭中性 */
+/** 状态色点：招聘中正向 / 暂停预警 / 草稿与关闭中性 */
 const STATUS_DOT: Record<JobStatus, string> = {
   OPEN: 'hf-dot hf-dot--ok',
   PAUSED: 'hf-dot hf-dot--alert',
-  PENDING_APPROVAL: 'hf-dot hf-dot--on',
   DRAFT: 'hf-dot hf-dot--off',
   CLOSED: 'hf-dot hf-dot--off',
 };
 const STATUS_TEXT: Record<JobStatus, string> = {
   OPEN: '',
   PAUSED: 'hf-state--warn',
-  PENDING_APPROVAL: '',
   DRAFT: 'hf-state--off',
   CLOSED: 'hf-state--off',
 };
@@ -45,7 +43,7 @@ const STATUS_TEXT: Record<JobStatus, string> = {
 const STATUS_FILTERS: Array<{ key: string; label: string }> = [
   { key: '', label: '全部' },
   { key: 'OPEN', label: '招聘中' },
-  { key: 'PENDING_APPROVAL', label: '待审批' },
+  { key: 'DRAFT', label: '草稿' },
 ];
 
 export function JobsPage() {
@@ -229,7 +227,7 @@ export function JobsPage() {
               {hc.used} / {job.headcount}
             </span>
             {hc.over > 0 && (
-              <Tooltip title={`已入职 + 已接受 Offer ${hc.used} 人，超出编制 ${hc.over} 人。请调整 HC 或确认是否需要追加编制审批。`}>
+              <Tooltip title={`已入职 + 已接受 Offer ${hc.used} 人，超出编制 ${hc.over} 人。请调整 HC 或确认是否需要追加编制。`}>
                 <span className="hf-tag hf-tag--err hf-hc-over">超编 {hc.over}</span>
               </Tooltip>
             )}
@@ -301,7 +299,7 @@ export function JobsPage() {
   ];
   const kpis = [
     { label: '招聘中', value: summary?.open ?? 0, unit: '个' },
-    { label: '待审批', value: summary?.pendingApproval ?? 0, unit: '个' },
+    { label: '草稿', value: summary?.draft ?? 0, unit: '个' },
     { label: 'HC 总量', value: summary?.headcount ?? 0, unit: '人' },
     { label: '已录用', value: summary?.hcUsed ?? 0, unit: '人' },
     { label: '在流程候选人', value: summary?.inFlow ?? 0, unit: '人' },

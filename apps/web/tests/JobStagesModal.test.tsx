@@ -8,12 +8,14 @@ import { jobsApi } from '../src/api';
 import type { Job, JobStage } from '../src/api/types';
 import { JobStagesModal } from '../src/pages/jobs/JobStagesModal';
 import { useAuthStore } from '../src/stores/auth';
+import { StageKind } from '@hireflow/shared';
 
 vi.mock('../src/api', () => ({ jobsApi: { getStages: vi.fn(), updateStages: vi.fn() } }));
 
 const stages: JobStage[] = [
-  { id: 's1', jobId: 'j1', name: '筛选', order: 0, _count: { applications: 2 } },
-  { id: 's2', jobId: 'j1', name: '面试', order: 1, _count: { applications: 0 } },
+  // 自定义阶段（kind=CUSTOM）才能删；系统阶段的规则见专门的用例
+  { id: 's1', jobId: 'j1', name: '筛选', kind: StageKind.CUSTOM, order: 0, _count: { applications: 2 } },
+  { id: 's2', jobId: 'j1', name: '面试', kind: StageKind.CUSTOM, order: 1, _count: { applications: 0 } },
 ];
 const job = { id: 'j1', title: '工程师' } as Job;
 const getStages = vi.mocked(jobsApi.getStages);
@@ -103,6 +105,19 @@ describe('职位招聘流程编辑器', () => {
     expect(screen.getByTitle('至少保留一个阶段')).toBeTruthy();
   });
 
+  it('系统阶段（筛选/面试/录用/入职）可以改名但不能删除，并标出类型', async () => {
+    getStages.mockResolvedValue([
+      { id: 'k1', jobId: 'j1', name: '简历筛选', kind: StageKind.SCREENING, order: 0, _count: { applications: 0 } },
+      { id: 'k2', jobId: 'j1', name: '作品集评审', kind: StageKind.CUSTOM, order: 1, _count: { applications: 0 } },
+    ]);
+    setup();
+    await screen.findByDisplayValue('简历筛选');
+    expect((screen.getByRole('button', { name: '删除阶段 1' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTitle('系统阶段：自动流转按它判断，可以改名，不能删除')).toBeTruthy();
+    expect(screen.getByText(/系统 · /)).toBeTruthy();
+    expect((screen.getByRole('button', { name: '删除阶段 2' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('空白名称不可保存；未保存关闭需要确认', async () => {
     const { user, onClose } = setup();
     await screen.findByDisplayValue('面试');
@@ -161,7 +176,7 @@ describe('职位招聘流程编辑器', () => {
       // 模拟 PUT 实际已提交但返回丢失：GET 返回服务端生成的新增阶段 ID。
       getStages.mockResolvedValue([
         ...stages,
-        { id: 's3', jobId: 'j1', name: '终面', order: 2, _count: { applications: 0 } },
+        { id: 's3', jobId: 'j1', name: '终面', kind: StageKind.CUSTOM, order: 2, _count: { applications: 0 } },
       ]);
       await user.click(screen.getByRole('button', { name: '重新读取服务端流程' }));
       await user.click(await screen.findByRole('button', { name: '丢弃草稿并读取' }));

@@ -64,7 +64,7 @@ beforeEach(() => {
   useAuthStore.setState({
     user: {
       id: 'hr',
-      email: 'hr@arthr.local',
+      email: 'hr@hireflow.local',
       name: '何欣',
       roles: ['HR'],
       department: null,

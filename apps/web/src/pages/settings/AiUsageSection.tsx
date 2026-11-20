@@ -15,7 +15,6 @@ const CAPABILITY_LABEL: Record<string, string> = {
   generateJd: '生成 JD',
   funnelInsight: '漏斗诊断',
   answerQuestion: '入职问答',
-  predictRetention: '留存预测',
 };
 
 const pct = (v: number) => `${(v * 100).toFixed(v > 0 && v < 0.1 ? 1 : 0)}%`;

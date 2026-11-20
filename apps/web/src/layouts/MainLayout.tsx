@@ -2,22 +2,18 @@ import {
   CloseOutlined,
   AppstoreOutlined,
   AuditOutlined,
-  CommentOutlined,
   DashboardOutlined,
-  FundOutlined,
+  DisconnectOutlined,
   HomeOutlined,
-  IdcardOutlined,
   KeyOutlined,
   LogoutOutlined,
   MenuOutlined,
-  ProfileOutlined,
-  ScheduleOutlined,
   SettingOutlined,
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import { ROLE_LABEL, type RoleCode } from '@hireflow/shared';
-import { Avatar, Breadcrumb, Button, Drawer, Dropdown, Layout, Menu, Space, Tag, Typography } from 'antd';
+import { App, Avatar, Breadcrumb, Button, Drawer, Dropdown, Layout, Menu, Space, Tabs, Tag, Typography } from 'antd';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { authApi } from '../api';
@@ -29,44 +25,19 @@ import { useAuthStore } from '../stores/auth';
 import { loginUrlFor } from '../utils/redirect';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { EmptyState } from '../components/EmptyState';
-import { firstVisiblePath, NAV_GROUPS } from './nav';
+import { firstVisiblePath, locate, NAV_ITEMS, sectionVisible, visibleSections } from './nav';
 
 const { Header, Sider, Content } = Layout;
 
-const PAGE_TITLES: Record<string, string> = {
-  '/dashboard': '数据大盘',
-  '/insights': '数据洞察',
-  '/jobs': '职位管理',
-  '/candidates': '候选人',
-  '/pipeline': '招聘看板',
-  '/interviews': '面试管理',
-  '/offers': '录用管理',
-  '/onboarding': '入职管理',
-  '/helpdesk': '入职问答',
-  '/settings': '系统设置',
-};
+export const BRAND = 'HireFlow 招聘';
 
 const MENU_ICONS: Record<string, ReactNode> = {
-  '/dashboard': <DashboardOutlined />,
-  '/insights': <FundOutlined />,
-  '/jobs': <ProfileOutlined />,
-  '/candidates': <TeamOutlined />,
-  '/pipeline': <AppstoreOutlined />,
-  '/interviews': <ScheduleOutlined />,
-  '/offers': <AuditOutlined />,
-  '/onboarding': <IdcardOutlined />,
-  '/helpdesk': <CommentOutlined />,
-  '/settings': <SettingOutlined />,
+  board: <AppstoreOutlined />,
+  candidates: <TeamOutlined />,
+  hire: <AuditOutlined />,
+  data: <DashboardOutlined />,
+  settings: <SettingOutlined />,
 };
-
-/** 侧边栏：路径和权限以 nav.ts 为准，这里只补图标 */
-const MENU_DEFS = NAV_GROUPS.map((group) => ({
-  label: group.label,
-  children: group.children.map((item) => ({
-    ...item,
-    icon: MENU_ICONS[item.key],
-  })),
-}));
 
 export function MainLayout() {
   const navigate = useNavigate();
@@ -75,6 +46,7 @@ export function MainLayout() {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const setUser = useAuthStore((s) => s.setUser);
+  const setAuth = useAuthStore((s) => s.setAuth);
   const queryClient = useQueryClient();
   /** 主动点「退出登录」时置位：此时跳登录页不能带 redirect，否则下一个账号会被带回上一个账号的页面 */
   const explicitLogout = useRef(false);
@@ -94,24 +66,23 @@ export function MainLayout() {
 
   const menuItems = useMemo(
     () =>
-      MENU_DEFS.map((group) => ({
-        type: 'group' as const,
-        label: group.label,
-        children: group.children
-          .filter((item) => !item.perms || item.perms.some((p) => hasPermission(p)))
-          .map(({ perms: _perms, ...item }) => item),
-      })).filter((group) => group.children.length > 0),
+      NAV_ITEMS.filter((item) => visibleSections(item, hasPermission).length > 0).map((item) => ({
+        key: item.key,
+        label: item.label,
+        icon: MENU_ICONS[item.key],
+      })),
     // user 进依赖：权限刷新后菜单要跟着重算（hasPermission 本身是稳定引用）
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [hasPermission, user?.permissions],
   );
+  const { message, modal } = App.useApp();
+  const current = locate(location.pathname);
 
   // 手机宽度：侧边栏收起成汉堡按钮 + 抽屉菜单，内容区才有完整宽度（64px 图标栏在 375 宽下占去 1/6）
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   useEffect(() => setMobileMenuOpen(false), [location.pathname]);
   // 标题 hook 必须在下面的 early return 之前
-  const titleKey = Object.keys(PAGE_TITLES).find((key) => location.pathname.startsWith(key));
-  useDocumentTitle(titleKey ? `${PAGE_TITLES[titleKey]} · ART 智能招聘` : 'ART 智能招聘');
+  useDocumentTitle(current ? `${current.section.label} · ${BRAND}` : BRAND);
 
   // 会话过期（401 清 token）才带 redirect 回跳；主动退出直接去登录页，让下一个账号落到自己的默认菜单
   if (!token) {
@@ -128,40 +99,53 @@ export function MainLayout() {
     );
   }
 
-  const selectedKey = Object.keys(PAGE_TITLES).find((key) => location.pathname.startsWith(key));
   const menu = (
     <Menu
       theme="dark"
       mode="inline"
-      selectedKeys={selectedKey ? [selectedKey] : []}
+      selectedKeys={current ? [current.item.key] : []}
       items={menuItems}
-      onClick={({ key }) => navigate(key)}
+      onClick={({ key }) => {
+        const item = NAV_ITEMS.find((i) => i.key === key);
+        const target = item && visibleSections(item, hasPermission)[0];
+        if (target) navigate(target.key);
+      }}
     />
   );
   const primaryRole = user?.roles[0] as RoleCode | undefined;
 
-  // 面包屑：首页 / 菜单分组 / 当前页（带页面图标）
-  const currentGroup = MENU_DEFS.find((g) => g.children.some((c) => c.key === selectedKey));
-  const currentItem = currentGroup?.children.find((c) => c.key === selectedKey);
   // 路由级权限：与菜单显隐同一份定义。直接输 URL 进入无权页面时统一给 403，
   // 不再让各页面自己处理（有的显示空态「去创建」，有的直接崩溃）
-  const canViewCurrent = !currentItem?.perms || currentItem.perms.some((p) => hasPermission(p));
+  const canViewCurrent = !current || sectionVisible(current.section, hasPermission);
+  const tabs = current ? visibleSections(current.item, hasPermission) : [];
   const breadcrumbItems = [
     { title: <HomeOutlined /> },
-    ...(currentGroup ? [{ title: currentGroup.label }] : []),
-    ...(selectedKey
+    ...(current
       ? [
           {
             title: (
               <Space size={6}>
-                {currentItem?.icon}
-                <Typography.Text strong>{PAGE_TITLES[selectedKey]}</Typography.Text>
+                {MENU_ICONS[current.item.key]}
+                <Typography.Text strong>{current.item.label}</Typography.Text>
               </Space>
             ),
           },
         ]
       : []),
   ];
+
+  const revokeOtherSessions = () =>
+    modal.confirm({
+      title: '退出其他设备？',
+      content: '其它浏览器和设备上的登录会立即失效，当前页面保持登录。',
+      okText: '退出其他设备',
+      cancelText: '取消',
+      onOk: async () => {
+        const { accessToken } = await authApi.revokeSessions();
+        if (user) setAuth(accessToken, user);
+        message.success('其他设备已退出登录');
+      },
+    });
 
   return (
     // 外层锁定视口高度：左侧菜单栏固定，右侧主内容区独立滚动
@@ -170,10 +154,10 @@ export function MainLayout() {
         <div className="sider-inner">
           <div className="sider-logo">
             <div className="sider-logo-mark" aria-hidden="true">
-              A
+              H
             </div>
             <div className="sider-logo-text">
-              <div className="sider-logo-name">ART 智能招聘</div>
+              <div className="sider-logo-name">{BRAND}</div>
               <div className="sider-logo-sub">招聘工作台</div>
             </div>
           </div>
@@ -192,10 +176,10 @@ export function MainLayout() {
         <div className="sider-inner">
           <div className="sider-logo">
             <div className="sider-logo-mark" aria-hidden="true">
-              A
+              H
             </div>
             <div className="sider-logo-text">
-              <div className="sider-logo-name">ART 智能招聘</div>
+              <div className="sider-logo-name">{BRAND}</div>
             </div>
             {/* 和全站弹层一致：关闭在右上角；点遮罩、Esc 同样可关 */}
             <Button
@@ -231,6 +215,12 @@ export function MainLayout() {
                     label: '修改密码',
                     onClick: () => setPasswordOpen(true),
                   },
+                  {
+                    key: 'revoke',
+                    icon: <DisconnectOutlined />,
+                    label: '退出其他设备',
+                    onClick: revokeOtherSessions,
+                  },
                   { type: 'divider' },
                   {
                     key: 'logout',
@@ -262,6 +252,14 @@ export function MainLayout() {
         </Header>
         {/* 主内容区：唯一滚动容器 */}
         <Content className="layout-content">
+          {tabs.length > 1 && canViewCurrent && (
+            <Tabs
+              className="section-tabs"
+              activeKey={current?.section.key}
+              items={tabs.map((t) => ({ key: t.key, label: t.label }))}
+              onChange={(key) => navigate(key)}
+            />
+          )}
           {canViewCurrent ? (
             <Outlet />
           ) : (

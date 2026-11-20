@@ -41,7 +41,7 @@ describe('演示模式开关（登录页测试账号 / 预填密码）', () => {
   });
   it('演示密码只写在按需加载的 DemoAccounts 模块里，Login 主模块只在 DEV 分支内出现', () => {
     const login = readFileSync(resolve(__dirname, '../src/pages/Login.tsx'), 'utf8');
-    expect(login).toMatch(/import\.meta\.env\.DEV && DEMO_MODE \? \{ email: 'admin@arthr\.local', password: 'Admin@123456' \}/);
+    expect(login).toMatch(/import\.meta\.env\.DEV && DEMO_MODE \? \{ email: 'admin@hireflow\.local', password: 'Admin@123456' \}/);
     expect(login.match(/Admin@123456/g)).toHaveLength(1);
     expect(login).toContain("lazy(() => import('./DemoAccounts'))");
   });

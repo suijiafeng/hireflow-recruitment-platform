@@ -78,7 +78,7 @@ export function RuleScoreMark({ source }: { source?: string | null }) {
 
 /**
  * AI 产出来源徽标：「AI · 模型名 / 缓存 / 规则」，悬停看完整来源。
- * 全站 AI 结果（匹配依据、简历摘要、候选人对比、面评草稿、漏斗诊断、入职问答）统一用它，
+ * 全站 AI 结果（匹配依据、简历摘要、面评草稿、入职问答、Copilot）统一用它，
  * 用户一眼能分清「大模型给的」和「规则估算的」。
  */
 export function AiSourceBadge({

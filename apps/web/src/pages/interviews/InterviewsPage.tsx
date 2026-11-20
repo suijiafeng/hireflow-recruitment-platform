@@ -18,6 +18,7 @@ import { useAuthStore } from '../../stores/auth';
 import { FormModal } from '../../components/FormModal';
 import { pressable } from '../../utils/pressable';
 import { useAppDialogs } from '../../hooks/useAppDialogs';
+import { portalUrl } from '../../hooks/usePortalLink';
 
 /** 15 分钟一档的全天时间选项 */
 const TIME_OPTIONS = Array.from({ length: 96 }, (_, i) => {
@@ -334,13 +335,13 @@ export function InterviewsPage() {
   const copySelfScheduleLink = async (interviewId: string) => {
     try {
       const { token } = await interviewsApi.selfScheduleLink(interviewId);
-      const url = `${window.location.origin}/portal/interview/${token}`;
+      const url = portalUrl(token);
       try {
         await navigator.clipboard.writeText(url);
-        message.success('选时链接已复制（7 天内有效，选定后失效），请发送给候选人');
+        message.success('候选人页链接已复制，候选人打开后即可选择面试时间');
       } catch {
         modal.info({
-          title: '候选人选时链接',
+          title: '候选人页链接',
           content: (
             <Typography.Text copyable className="u-break-all">
               {url}
@@ -519,7 +520,7 @@ export function InterviewsPage() {
                 ? { key: 'schedule', label: '安排', hint: '直接填写面试时间', onClick: () => setScheduleFor(iv) }
                 : null,
               canSendLink
-                ? { key: 'link', label: '选时', hint: '生成自助选时链接发给候选人', onClick: () => void copySelfScheduleLink(iv.id) }
+                ? { key: 'link', label: '选时', hint: '复制候选人页链接，候选人在页上选择面试时间', onClick: () => void copySelfScheduleLink(iv.id) }
                 : null,
               !pending && iv.status === 'SCHEDULED' && canSchedule
                 ? { key: 'reschedule', label: '改期', hint: '修改面试时间（自动释放原档、占用新档）', onClick: () => setScheduleFor(iv) }

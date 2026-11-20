@@ -3,7 +3,7 @@ import { Button } from 'antd';
 import axios from 'axios';
 import { extractErrorMessage } from '../../api/client';
 import { EmptyState } from '../../components/EmptyState';
-import { PortalShell } from './InterviewPortalPage';
+import { PortalShell } from './PortalShell';
 
 export type PortalLinkErrorKind = 'expired' | 'invalid' | 'network';
 
@@ -35,9 +35,16 @@ const COPY: Record<PortalLinkErrorKind, { title: string; fallback: string }> = {
   },
 };
 
-/** 候选人 / 新员工门户的统一错误页：区分过期、无效与网络问题，给出下一步 */
-export function PortalLinkError({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
-  const kind = portalErrorKind(error);
+/** 候选人页的统一错误页：区分过期、无效与网络问题，给出下一步 */
+export function PortalLinkError({
+  error,
+  onRetry,
+  kind = portalErrorKind(error),
+}: {
+  error?: unknown;
+  onRetry?: () => void;
+  kind?: PortalLinkErrorKind;
+}) {
   const copy = COPY[kind];
   // 过期与无效的说明以前端文案为准（后端文案偏技术）；网络错误展示后端/超时原因
   const desc = kind === 'network' ? extractErrorMessage(error, copy.fallback) : copy.fallback;
@@ -60,4 +67,9 @@ export function PortalLinkError({ error, onRetry }: { error: unknown; onRetry?: 
       />
     </PortalShell>
   );
+}
+
+/** 旧版 /portal/(offer|onboarding|interview|prescreen)/:token 地址：统一按「链接无效」处理 */
+export function RetiredPortalLink() {
+  return <PortalLinkError kind="invalid" />;
 }

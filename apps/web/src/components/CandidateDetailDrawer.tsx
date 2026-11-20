@@ -2,6 +2,7 @@ import {
   CalendarOutlined,
   FileTextOutlined,
   InboxOutlined,
+  LinkOutlined,
   PaperClipOutlined,
   LoadingOutlined,
   PlusOutlined,
@@ -36,6 +37,7 @@ import { EmptyState } from './EmptyState';
 import { prepareUpload } from '../utils/prepareUpload';
 import { pressable } from '../utils/pressable';
 import { resumeParseState } from '../utils/resumeParse';
+import { useCopyPortalLink } from '../hooks/usePortalLink';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -56,32 +58,31 @@ const ACTION_LABEL: Record<string, string> = {
   'application.withdrawn': '候选人撤回',
   'application.scored': 'AI 匹配评分',
   'application.candidates_compared': 'AI 候选人对比',
-  'application.prescreen_sent': '发送预筛问卷',
-  'application.prescreen_submitted': '候选人提交预筛',
   'application.talent_pool_activated': '人才库唤醒激活',
   'job.talent_pool_scanned': '人才库扫描',
   'interview.scheduled': '安排面试',
   'interview.self_scheduled': '候选人自助选时',
   'interview.canceled': '取消面试',
   'evaluation.submitted': '提交面评',
-  'offer.initiated': '发起 Offer',
-  'offer.approved': 'Offer 审批通过',
-  'offer.rejected': 'Offer 审批驳回',
+  'offer.initiated': '创建 Offer',
   'offer.sent': 'Offer 已发送',
   'offer.responded': '候选人答复 Offer',
-  'offer.resubmitted': 'Offer 修改重提',
   'offer.extended': 'Offer 答复期续期',
-  'portal.link_rotated': '重新生成候选人链接',
+  'portal.link_rotated': '重新生成候选人页链接',
+  'portal.link_revoked': '候选人页链接失效',
   'offer.expired': 'Offer 已过期失效',
   'onboarding.created': '创建入职单',
-  'onboarding.item_done': '入职待办更新',
-  'onboarding.completed': '入职闭环完成',
-  'onboarding.document_added': '提交入职材料',
+  'onboarding.completed': '确认入职',
+  'onboarding.info_submitted': '候选人提交入职信息',
   'contract.created': '生成劳动合同',
-  'contract.sent': '合同发送签署',
-  'contract.signed': '合同签署完成',
+  'contract.signed': '候选人确认合同',
   'webhook.fired': '自动化通知（Webhook）',
   'candidate.note_added': '添加备注',
+  'copilot.action_executed': 'Copilot 执行操作',
+  'copilot.action_rejected': 'Copilot 操作被取消',
+  'copilot.action_failed': 'Copilot 操作失败',
+  'job.deleted': '删除职位',
+  'candidate.deleted': '删除候选人',
 };
 
 const CONCLUSION_TAG: Record<string, string> = {
@@ -173,6 +174,7 @@ function ApplicationBlock({
   onOffer,
   onReject,
   onReactivate,
+  onCopyLink,
   reactivating,
   scoring,
 }: {
@@ -183,6 +185,7 @@ function ApplicationBlock({
   onOffer: (id: string) => void;
   onReject: (id: string) => void;
   onReactivate: (jobId: string) => void;
+  onCopyLink: (applicationId: string) => void;
   reactivating: boolean;
   scoring: boolean;
 }) {
@@ -191,10 +194,9 @@ function ApplicationBlock({
   const active = application.status === 'ACTIVE';
   // 候选人拒绝 / 过期未续的 Offer 已终结，可以重新发起
   const liveOffer =
-    application.offer && application.offer.decision !== 'DECLINED' && application.offer.approvalStatus !== 'EXPIRED'
+    application.offer && application.offer.decision !== 'DECLINED' && application.offer.status !== 'EXPIRED'
       ? application.offer
       : null;
-  const prescreen = application.prescreen;
   const report = application.matchReport;
   const score = application.matchScore;
 
@@ -277,23 +279,6 @@ function ApplicationBlock({
         </div>
       )}
 
-      {prescreen && (
-        <div className={prescreen.flags.length ? 'hf-notice hf-notice--warn u-mb-8' : 'hf-notice hf-notice--flat u-mb-8'}>
-          <div className="u-flex-1">
-            <div className="hf-caption u-mb-4">
-              预筛问卷 · {dayjs(prescreen.submittedAt).format('MM-DD HH:mm')} 提交
-            </div>
-            <div className="hf-secondary">
-              期望月薪 ¥{prescreen.expectedSalary.toLocaleString()} · 最早 {prescreen.availableDate} 到岗 ·{' '}
-              {prescreen.travelOk ? '接受出差' : '不接受出差'}
-              {prescreen.note ? ` · ${prescreen.note}` : ''}
-            </div>
-            {prescreen.flags.length > 0 && (
-              <div className="hf-state--warn u-mt-4">不符项：{prescreen.flags.join('；')}</div>
-            )}
-          </div>
-        </div>
-      )}
       {application.interviews.length === 0 ? (
         <div className="hf-iv-row hf-faint">暂无面试安排</div>
       ) : (
@@ -327,9 +312,16 @@ function ApplicationBlock({
         ) : (
           hasPermission(PERMISSIONS.OFFER_INITIATE) && (
             <span className="hf-link" {...pressable(() => onOffer(application.id))}>
-              发起 Offer
+              发送 Offer
             </span>
           )
+        )}
+        {(hasPermission(PERMISSIONS.INTERVIEW_SCHEDULE) ||
+          hasPermission(PERMISSIONS.OFFER_INITIATE) ||
+          hasPermission(PERMISSIONS.ONBOARDING_MANAGE)) && (
+          <span className="hf-link" title="选面试时间、答复 Offer、填写入职信息共用这一个链接" {...pressable(() => onCopyLink(application.id))}>
+            <LinkOutlined /> 复制候选人页链接
+          </span>
         )}
         <span className="u-flex-1" />
         {hasPermission(PERMISSIONS.APPLICATION_MOVE) && (
@@ -397,6 +389,7 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
     void queryClient.invalidateQueries({ queryKey: ['candidates'] });
     void queryClient.invalidateQueries({ queryKey: ['board'] });
   };
+  const copyPortalLink = useCopyPortalLink(invalidate);
 
   const parseMutation = useMutation({
     mutationFn: resumesApi.parse,
@@ -501,7 +494,9 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
     mutationFn: ({ startDate, ...values }: OfferFormValues) =>
       offersApi.create({ applicationId: offerFor!, ...values, startDate: startDate.format('YYYY-MM-DD') }),
     onSuccess: () => {
-      message.success('Offer 已发起，等待用人经理审批（见「录用管理」）');
+      message.success('Offer 已发出，卡片已移到「录用」阶段');
+      // 发出即可分享：顺手复制候选人页链接（复制不了会弹出链接手动复制）
+      if (offerFor) void copyPortalLink(offerFor);
       setOfferFor(null);
       offerForm.resetFields();
       invalidate();
@@ -626,6 +621,7 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                     onOffer={setOfferFor}
                     onReject={setRejectFor}
                     onReactivate={(jobId) => reactivateMutation.mutate(jobId)}
+                    onCopyLink={(id) => void copyPortalLink(id)}
                     reactivating={reactivateMutation.isPending}
                     scoring={scoreMutation.isPending}
                   />
@@ -867,18 +863,18 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
             className="hf-modal"
             title={
               <>
-                发起 Offer
+                发送 Offer
                 <div className="hf-modal-sub">{detail.name}</div>
               </>
             }
             open={Boolean(offerFor)}
             onCancel={() => setOfferFor(null)}
             onOk={() => offerForm.submit()}
-            okText="提交审批"
+            okText="发送 Offer"
             confirmLoading={offerMutation.isPending}
             footer={(_, { OkBtn, CancelBtn }) => (
               <>
-                <span className="hf-modal-hint">提交后进入审批，审批通过才能发送候选人</span>
+                <span className="hf-modal-hint">发出后候选人在候选人页答复；链接会自动复制</span>
                 <CancelBtn />
                 <OkBtn />
               </>
@@ -935,12 +931,12 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                   placeholder="选择日期"
                 />
               </Form.Item>
-              {/* 年度总包自动计算，避免审批人自己乘 */}
+              {/* 年度总包自动计算 */}
               <div className="hf-notice hf-notice--flat u-mb-16">
                 <span className="u-flex-1">年度总包（自动计算）</span>
                 <span className="hf-kpi-num">{totalPackage ? `¥${totalPackage.toLocaleString()}` : '—'}</span>
               </div>
-              <Form.Item name="note" label="备注（审批人可见）">
+              <Form.Item name="note" label="备注（候选人可见）">
                 <Input.TextArea rows={2} maxLength={500} placeholder="如：竞品有同级别 Offer，建议按带宽上限给" />
               </Form.Item>
             </Form>
