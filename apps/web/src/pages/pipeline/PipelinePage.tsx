@@ -24,7 +24,6 @@ import {
 import { PERMISSIONS, REJECT_REASONS, STAGE_STAY_SLA } from '@hireflow/shared';
 import {
   Alert,
-  App,
   Badge,
   Button,
   Card,
@@ -53,8 +52,9 @@ import { useDrawerParam } from '../../hooks/useUrlState';
 import { useAuthStore } from '../../stores/auth';
 import { pickDefaultJobId } from '../../utils/jobs';
 import { FormModal } from '../../components/FormModal';
-import { RuleScoreMark } from '../../components/ui';
+import { AiSourceBadge, RuleScoreMark } from '../../components/ui';
 import { pressable } from '../../utils/pressable';
+import { useAppDialogs } from '../../hooks/useAppDialogs';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -302,7 +302,12 @@ function BoardColumnView({
   return (
     <div
       ref={setNodeRef}
-      className={['kanban-col', isOver ? 'kanban-col--over' : '', blockedReason ? 'kanban-col--blocked' : '']
+      className={[
+        'kanban-col',
+        cards.length === 0 ? 'kanban-col--empty' : '',
+        isOver ? 'kanban-col--over' : '',
+        blockedReason ? 'kanban-col--blocked' : '',
+      ]
         .filter(Boolean)
         .join(' ')}
     >
@@ -345,7 +350,8 @@ function BoardColumnView({
             />
           ),
         )}
-        {cards.length === 0 && <div className="kanban-col-empty">拖拽候选人到此阶段</div>}
+        {/* 空列不再画大块虚线框（6 列里 4 列都是虚线，视觉噪音大）：平时只留一行弱提示，拖拽经过时才高亮成落点 */}
+        {cards.length === 0 && <div className="kanban-col-empty">暂无候选人</div>}
       </div>
     </div>
   );
@@ -433,7 +439,12 @@ function CompareModal({ data, loading, onClose }: { data: CompareData | null; lo
           <Alert
             type="info"
             showIcon
-            title={`AI 综合意见（${data.aiMeta.provider}${data.aiMeta.degraded ? '·降级' : ''}，仅供参考，终审权在用人经理）`}
+            title={
+              <span className="u-flex-gap-8 u-flex-center-v">
+                AI 综合意见 <AiSourceBadge meta={data.aiMeta} />
+                <span className="hf-faint">仅供参考，终审权在用人经理</span>
+              </span>
+            }
             description={
               <>
                 <Typography.Paragraph className="u-mb-8">{data.ai.summary}</Typography.Paragraph>
@@ -469,7 +480,7 @@ interface PendingMove {
 }
 
 export function PipelinePage() {
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [searchParams, setSearchParams] = useSearchParams();

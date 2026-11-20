@@ -1,7 +1,7 @@
 import { AppstoreOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { JOB_STATUS_LABEL, PERMISSIONS, type JobStatus } from '@hireflow/shared';
-import { App, Button, Form, Input, InputNumber, Select, Spin, Table } from 'antd';
+import { Button, Form, Input, InputNumber, Select, Spin, Table, Tooltip } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import type { CSSProperties } from 'react';
@@ -19,6 +19,8 @@ import { FormModal } from '../../components/FormModal';
 import { useUrlParams } from '../../hooks/useUrlState';
 import { pressable } from '../../utils/pressable';
 import { departmentOptions } from '../../utils/departments';
+import { useAppDialogs } from '../../hooks/useAppDialogs';
+import { hcProgress } from '../../utils/jobs';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -47,7 +49,7 @@ const STATUS_FILTERS: Array<{ key: string; label: string }> = [
 ];
 
 export function JobsPage() {
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
 
@@ -215,19 +217,22 @@ export function JobsPage() {
       // HC 进度：横向条，取代 28px 环形进度
       title: 'HC 进度',
       key: 'hc',
-      width: 170,
+      width: 210,
       render: (_, job) => {
-        const used = job.hcUsed ?? 0;
-        const pct = Math.min(100, Math.round((used / job.headcount) * 100));
-        const barColor = pct >= 100 ? '#059669' : pct >= 80 ? '#B45309' : '#2563EB';
+        const hc = hcProgress(job.hcUsed ?? 0, job.headcount);
         return (
-          <span className="hf-progress">
+          <span className={hc.over > 0 ? 'hf-progress hf-progress--over' : 'hf-progress'}>
             <span className="hf-bar-track">
-              <span className="hf-bar-fill" style={cssVars({ '--w': `${Math.max(pct, 2)}%`, '--c': barColor })} />
+              <span className="hf-bar-fill" style={cssVars({ '--w': `${Math.max(hc.pct, 2)}%`, '--c': hc.color })} />
             </span>
             <span className="hf-progress-num">
-              {used} / {job.headcount}
+              {hc.used} / {job.headcount}
             </span>
+            {hc.over > 0 && (
+              <Tooltip title={`已入职 + 已接受 Offer ${hc.used} 人，超出编制 ${hc.over} 人。请调整 HC 或确认是否需要追加编制审批。`}>
+                <span className="hf-tag hf-tag--err hf-hc-over">超编 {hc.over}</span>
+              </Tooltip>
+            )}
           </span>
         );
       },
@@ -253,7 +258,7 @@ export function JobsPage() {
       // 操作：编辑/删除平铺，低频的人才库唤醒与评分卡模板收进「···」
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 150,
       align: 'right',
       fixed: 'right',
       render: (_, job) => {
@@ -390,7 +395,7 @@ export function JobsPage() {
               columns={jobColumns}
               dataSource={items}
               rowKey="id"
-              scroll={{ x: 1010, y: 1 }}
+              scroll={{ x: 1080, y: 1 }}
               pagination={{
                 current: page,
                 pageSize: PAGE_SIZE,

@@ -8,7 +8,7 @@ import { analyticsApi, jobsApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import type { FunnelStage } from '../../api/types';
 import { ChartTip, SERIES, TrendChart } from '../../components/charts';
-import { EmptyBlock } from '../../components/ui';
+import { AiSourceBadge, EmptyBlock } from '../../components/ui';
 import { downloadCsv } from '../../utils/csv';
 import { pickDefaultJobId } from '../../utils/jobs';
 import { useUrlState } from '../../hooks/useUrlState';
@@ -391,8 +391,9 @@ export function DashboardPage() {
                 </span>
                 <span className="panel-head-right">
                   {insight && (
-                    <span className="panel-note">
-                      {insight.provider === 'mock' ? '规则引擎' : insight.provider} · {insight.at}
+                    <span className="panel-note u-flex-gap-8 u-flex-center-v">
+                      <AiSourceBadge meta={{ provider: insight.provider }} note="诊断仅供参考" />
+                      {insight.at}
                     </span>
                   )}
                   <Button

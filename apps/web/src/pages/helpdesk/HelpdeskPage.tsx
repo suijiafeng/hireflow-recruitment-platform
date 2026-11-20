@@ -13,7 +13,7 @@ import dayjs from 'dayjs';
 import { useEffect, useRef, useState } from 'react';
 import { aiApi, helpdeskApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
-import { EmptyBlock } from '../../components/ui';
+import { AiSourceBadge, EmptyBlock } from '../../components/ui';
 import { providerLabel } from '../../utils/aiProvider';
 import { pressable } from '../../utils/pressable';
 
@@ -61,6 +61,7 @@ function ChatRow({ msg, onCopy }: { msg: ChatMessage; onCopy: (text: string) => 
         <div className={isUser ? 'hf-bubble hf-bubble--user' : 'hf-bubble'}>{msg.text}</div>
         {!isUser && (
           <div className="hf-chat-meta">
+            <AiSourceBadge meta={msg.provider ? { provider: msg.provider } : undefined} note="仅依据制度文档作答" />
             {(msg.sources?.length ?? 0) > 0 && (
               <>
                 <FileTextOutlined />
@@ -176,7 +177,13 @@ export function HelpdeskPage() {
                   {[providerLabel(aiStatus.data?.label ?? lastProvider), '仅依据制度文档作答'].filter(Boolean).join(' · ')}
                 </span>
                 {messages.length > 0 && (
-                  <Popconfirm title="清空当前对话记录？" okText="清空" onConfirm={clearChat}>
+                  <Popconfirm
+                    title="清空当前对话记录？"
+                    okText="清空"
+                    okButtonProps={{ danger: true }}
+                    cancelText="取消"
+                    onConfirm={clearChat}
+                  >
                     <span className="hf-link">清空对话</span>
                   </Popconfirm>
                 )}
@@ -266,8 +273,11 @@ export function HelpdeskPage() {
             </div>
           </div>
 
-          {/* 右栏：常见问题（chip）+ 知识库范围 */}
+          {/* 右栏：常见问题（chip）+ 知识库范围。
+              还没提问时，同一组常见问题已经摆在对话区中间的欢迎态里——右栏再放一份就是重复，
+              所以右栏的常见问题只在开始对话、欢迎态消失后出现 */}
           <div className="hf-rail hf-rail--narrow">
+            {messages.length > 0 && (
             <div className="hf-panel hf-panel--fit">
               <div className="hf-panel-head">
                 <span className="hf-panel-title">
@@ -282,6 +292,7 @@ export function HelpdeskPage() {
                 ))}
               </div>
             </div>
+            )}
 
             <div className="hf-panel hf-panel--grow">
               <div className="hf-panel-head">
