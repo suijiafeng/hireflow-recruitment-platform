@@ -7,6 +7,7 @@ import { ApplicationsService } from './applications.service';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { CompareApplicationsDto } from './dto/compare-applications.dto';
 import { BatchMoveDto, BatchRejectDto, MoveStageDto, RejectApplicationDto } from './dto/move-stage.dto';
+import { AiRateLimit } from '../../common/guards/ai-throttle.guard';
 
 @ApiTags('applications')
 @ApiBearerAuth()
@@ -36,6 +37,7 @@ export class ApplicationsController {
   }
 
   @Post('applications/:id/score')
+  @AiRateLimit()
   @RequirePermissions(PERMISSIONS.APPLICATION_MOVE)
   @ApiOperation({ summary: 'AI 岗位匹配度评分（可解释报告回写）' })
   score(@Param('id') id: string, @CurrentUser() user: JwtUser) {
@@ -43,6 +45,7 @@ export class ApplicationsController {
   }
 
   @Post('applications/compare')
+  @AiRateLimit()
   @RequirePermissions(PERMISSIONS.CANDIDATE_READ)
   @ApiOperation({ summary: '候选人对比（2-4 人并排 + AI 综合意见，同职位内）' })
   compare(@Body() body: CompareApplicationsDto, @CurrentUser() user: JwtUser) {

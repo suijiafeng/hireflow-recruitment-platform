@@ -4,6 +4,7 @@ import { PERMISSIONS } from '@hireflow/shared';
 import { CurrentUser, type JwtUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { CandidatesService } from './candidates.service';
+import { AiRateLimit } from '../../common/guards/ai-throttle.guard';
 
 @ApiTags('candidates')
 @ApiBearerAuth()
@@ -12,6 +13,7 @@ export class ResumesController {
   constructor(private readonly candidatesService: CandidatesService) {}
 
   @Post(':id/parse')
+  @AiRateLimit()
   @RequirePermissions(PERMISSIONS.CANDIDATE_UPDATE)
   @ApiOperation({ summary: 'AI 解析简历（结构化 + 技能标签 + 摘要）' })
   parse(@Param('id') id: string, @CurrentUser() user: JwtUser) {

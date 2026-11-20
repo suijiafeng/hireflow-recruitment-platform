@@ -5,6 +5,7 @@ import { CurrentUser, type JwtUser } from '../../common/decorators/current-user.
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { AnalyticsService } from './analytics.service';
 import { QueryInsightsDto } from './dto/query-insights.dto';
+import { AiRateLimit } from '../../common/guards/ai-throttle.guard';
 
 @ApiTags('analytics')
 @ApiBearerAuth()
@@ -33,6 +34,7 @@ export class AnalyticsController {
   }
 
   @Post('insight/:jobId')
+  @AiRateLimit()
   @RequirePermissions(PERMISSIONS.DASHBOARD_VIEW)
   @ApiOperation({ summary: 'AI 招聘健康度诊断' })
   insight(@Param('jobId') jobId: string, @CurrentUser() user: JwtUser) {

@@ -6,6 +6,7 @@ import { CurrentUser, type JwtUser } from '../../common/decorators/current-user.
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { ApprovalDto, CreateOfferDto, ResubmitOfferDto, RespondDto } from './dto/create-offer.dto';
 import { OffersService } from './offers.service';
+import { AiRateLimit } from '../../common/guards/ai-throttle.guard';
 
 @ApiTags('offers')
 @ApiBearerAuth()
@@ -76,6 +77,7 @@ export class OffersController {
   }
 
   @Post(':id/retention')
+  @AiRateLimit()
   @ApiOperation({ summary: 'AI 留存预测（辅助参考）' })
   retention(@Param('id') id: string, @CurrentUser() user: JwtUser) {
     return this.offersService.retention(id, user);
