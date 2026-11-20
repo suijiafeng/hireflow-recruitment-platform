@@ -9,5 +9,6 @@ import { OffersService } from './offers.service';
   imports: [OnboardingModule, ApplicationsModule],
   controllers: [OffersController, OfferPortalController],
   providers: [OffersService],
+  exports: [OffersService],
 })
 export class OffersModule {}
