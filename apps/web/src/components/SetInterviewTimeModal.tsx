@@ -1,10 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { App, DatePicker, Form, InputNumber } from 'antd';
+import { DatePicker, Form, InputNumber } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { interviewsApi } from '../api';
 import { extractErrorMessage, isConflictError } from '../api/client';
 import type { Interview } from '../api/types';
 import { FormModal } from './FormModal';
+import { useAppDialogs } from '../hooks/useAppDialogs';
 
 interface Props {
   /** 待定时间/改期的面试；null 时弹窗关闭 */
@@ -17,7 +18,7 @@ interface Props {
  * 已经和候选人电话/微信约好时，没必要再让对方去点链接。
  */
 export function SetInterviewTimeModal({ interview, onClose }: Props) {
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const queryClient = useQueryClient();
   const [form] = Form.useForm<{ scheduledAt: Dayjs; durationMins: number }>();
   const isReschedule = Boolean(interview?.scheduledAt);

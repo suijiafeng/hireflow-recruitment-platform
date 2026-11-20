@@ -1,6 +1,6 @@
 import { CheckOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { App, Button, Form, Result, Select, Spin } from 'antd';
+import { Button, Form, Result, Select, Spin } from 'antd';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
@@ -9,6 +9,7 @@ import { extractErrorMessage } from '../../api/client';
 import { PortalShell } from './InterviewPortalPage';
 import { FormModal } from '../../components/FormModal';
 import { pressable } from '../../utils/pressable';
+import { useAppDialogs } from '../../hooks/useAppDialogs';
 
 /**
  * Offer 门户（免登录 H5）：
@@ -17,7 +18,7 @@ import { pressable } from '../../utils/pressable';
  */
 export function OfferPortalPage() {
   const { token = '' } = useParams();
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const queryClient = useQueryClient();
   const [declineOpen, setDeclineOpen] = useState(false);
   const [declineForm] = Form.useForm<{ reason: string }>();

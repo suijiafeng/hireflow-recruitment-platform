@@ -8,8 +8,10 @@ export type RowAction = {
   /** 悬停提示：label 省略掉的信息放这里，别让用户靠猜 */
   hint?: string;
   onClick: () => void;
-  /** 危险操作，文字标红 */
+  /** 危险操作，文字标红；默认收进「···」末尾并用分隔线隔开，不和常用操作挨着 */
   danger?: boolean;
+  /** 危险操作仍要平铺（如审批的「通过 / 驳回」成对出现，且驳回本身有填写原因的二次确认） */
+  pinned?: boolean;
   /** 无权限或状态不允许：置灰且不可点 */
   disabled?: boolean;
 };
@@ -35,11 +37,10 @@ export function RowActions({ actions, max = 2 }: Props) {
   const list = actions.filter(Boolean) as RowAction[];
   if (list.length === 0) return <span className="hf-faint">—</span>;
 
-  const inline = list.slice(0, max);
-  const overflow = list.slice(max);
+  const { inline, overflow, dangerFrom } = splitRowActions(list, max);
 
   return (
-    <span className="u-flex-end u-flex-gap-12">
+    <span className="hf-row-acts u-flex-end u-flex-gap-12">
       {inline.map((a) => (
         <span
           key={a.key}
@@ -61,12 +62,10 @@ export function RowActions({ actions, max = 2 }: Props) {
         <Dropdown
           trigger={['click']}
           menu={{
-            items: overflow.map((a) => ({
-              key: a.key,
-              label: a.label,
-              danger: a.danger,
-              disabled: a.disabled,
-            })),
+            items: overflow.flatMap((a, i) => [
+              ...(i === dangerFrom && i > 0 ? [{ type: 'divider' as const, key: `divider-${a.key}` }] : []),
+              { key: a.key, label: a.label, danger: a.danger, disabled: a.disabled, title: a.hint },
+            ]),
             onClick: ({ key, domEvent }) => {
               domEvent.stopPropagation();
               overflow.find((a) => a.key === key)?.onClick();
@@ -80,4 +79,18 @@ export function RowActions({ actions, max = 2 }: Props) {
       )}
     </span>
   );
+}
+
+/**
+ * 排布规则：
+ * 1. 非危险操作按传入顺序平铺前 max 个（pinned 的危险操作视同普通操作）；
+ * 2. 其余收进「···」，危险操作一律排在菜单最后，前面加分隔线——不和常用操作挨着，降低误点。
+ */
+export function splitRowActions(list: RowAction[], max: number) {
+  const isLoose = (a: RowAction) => a.danger && !a.pinned;
+  const safe = list.filter((a) => !isLoose(a));
+  const danger = list.filter(isLoose);
+  const inline = safe.slice(0, max);
+  const overflow = [...safe.slice(max), ...danger];
+  return { inline, overflow, dangerFrom: danger.length ? overflow.length - danger.length : -1 };
 }

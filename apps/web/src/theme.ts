@@ -210,6 +210,7 @@ export function buildTheme(disableMotion: boolean): ThemeConfig {
         defaultBg: SURFACE.page,
         defaultColor: INK.secondary,
       },
+      // 弹窗统一骨架见 app.css「弹窗：关闭按钮统一在右上角」
       Modal: {
         borderRadiusLG: 8,
         titleFontSize: 18,

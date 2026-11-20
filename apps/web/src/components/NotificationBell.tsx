@@ -1,8 +1,8 @@
-import { BellOutlined } from '@ant-design/icons';
+import { BellOutlined, CloseOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Badge, Button, List, Popover, Typography } from 'antd';
+import { Badge, Button, Popover, Typography } from 'antd';
+import { useEffect, useState } from 'react';
 import dayjs from 'dayjs';
-import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { pressable } from '../utils/pressable';
 import { notificationsApi } from '../api';
@@ -40,6 +40,14 @@ export function NotificationBell() {
     }
   };
 
+  // 和弹窗 / 抽屉一致：Esc 关闭
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
   return (
     <Popover
       rootClassName="notif-popover"
@@ -48,13 +56,24 @@ export function NotificationBell() {
       onOpenChange={setOpen}
       placement="bottomRight"
       title={
-        <div className="u-flex-between">
+        <div className="u-flex-between notif-head">
           <span>通知</span>
-          {(query.data?.unread ?? 0) > 0 && (
-            <Button type="link" size="small" onClick={() => readAllMutation.mutate()}>
-              全部已读
-            </Button>
-          )}
+          <span className="u-flex-center-v">
+            {(query.data?.unread ?? 0) > 0 && (
+              <Button type="link" size="small" onClick={() => readAllMutation.mutate()}>
+                全部已读
+              </Button>
+            )}
+            {/* 关闭在右上角，与弹窗 / 抽屉一致 */}
+            <Button
+              type="text"
+              size="small"
+              className="notif-close"
+              icon={<CloseOutlined />}
+              aria-label="关闭通知"
+              onClick={() => setOpen(false)}
+            />
+          </span>
         </div>
       }
       content={
@@ -62,11 +81,10 @@ export function NotificationBell() {
           {!query.data?.items.length ? (
             <EmptyBlock minHeight={140} description="暂无通知" />
           ) : (
-            <List
-              size="small"
-              dataSource={query.data.items}
-              renderItem={(item) => (
-                <List.Item
+            <ul className="notif-list">
+              {query.data.items.map((item) => (
+                <li
+                  key={item.id}
                   className={item.read ? 'notif-item notif-item--read' : 'notif-item'}
                   {...pressable(() => handleClick(item))}
                 >
@@ -76,29 +94,27 @@ export function NotificationBell() {
                         {!item.read && <Badge status="processing" className="u-mr-8" />}
                         {item.title}
                       </Typography.Text>
-                      <span className="notif-time">
-                        {dayjs(item.createdAt).format('MM-DD HH:mm')}
-                      </span>
+                      <span className="notif-time">{dayjs(item.createdAt).format('MM-DD HH:mm')}</span>
                     </div>
                     {item.body && (
-                      <Typography.Paragraph
-                        className="notif-body"
-                        ellipsis={{ rows: 2, tooltip: item.body }}
-                      >
+                      <Typography.Paragraph className="notif-body" ellipsis={{ rows: 2, tooltip: item.body }}>
                         {item.body}
                       </Typography.Paragraph>
                     )}
                   </div>
-                </List.Item>
-              )}
-            />
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       }
     >
-      <Badge count={query.data?.unread ?? 0} size="small" offset={[-10, 10]}>
-        <BellOutlined className="bell-icon" />
-      </Badge>
+      {/* 铃铛做成真按钮：36px 热区、可键盘聚焦（之前只是一个图标） */}
+      <Button type="text" className="bell-btn" aria-label={`通知${query.data?.unread ? `，${query.data.unread} 条未读` : ''}`}>
+        <Badge count={query.data?.unread ?? 0} size="small" offset={[2, -2]}>
+          <BellOutlined className="bell-icon" />
+        </Badge>
+      </Button>
     </Popover>
   );
 }

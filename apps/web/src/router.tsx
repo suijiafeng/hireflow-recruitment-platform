@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
-import { Button, Result } from 'antd';
+import { Button } from 'antd';
+import { EmptyState } from './components/EmptyState';
 import { createBrowserRouter, isRouteErrorResponse, Navigate, useRouteError } from 'react-router';
 import { firstVisiblePath } from './layouts/nav';
 import { useAuthStore } from './stores/auth';
@@ -24,24 +25,25 @@ function RouteErrorPage() {
   const status = isRouteErrorResponse(error) ? error.status : 0;
   return (
     <div className="route-error">
-      <Result
-        status="error"
+      <EmptyState
+        size="lg"
+        tone="warn"
         title={chunk ? '页面没有加载出来' : '页面出现问题'}
-        subTitle={
+        description={
           chunk
             ? '页面资源加载失败。刷新即可继续；如果系统刚更新过，刷新会拿到最新页面。'
             : status
               ? `请求没有完成（${status}）。可以刷新页面，或先回到首页。`
               : '这里暂时打不开。可以刷新页面，或先回到首页。'
         }
-        extra={[
-          <Button key="reload" type="primary" onClick={() => window.location.reload()}>
-            刷新页面
-          </Button>,
-          <Button key="home" onClick={() => window.location.assign('/')}>
-            返回首页
-          </Button>,
-        ]}
+        action={
+          <>
+            <Button onClick={() => window.location.assign('/')}>返回首页</Button>
+            <Button type="primary" onClick={() => window.location.reload()}>
+              刷新页面
+            </Button>
+          </>
+        }
       />
     </div>
   );

@@ -13,7 +13,7 @@ import {
   DOCUMENT_TYPE_META,
   type ContractSignStatus,
 } from '@hireflow/shared';
-import { App, Button, Form, Input, Result, Select, Spin, Upload } from 'antd';
+import { Button, Form, Input, Result, Select, Spin, Upload } from 'antd';
 import dayjs from 'dayjs';
 import type { CSSProperties } from 'react';
 import { useEffect, useState } from 'react';
@@ -26,6 +26,7 @@ import { ContractText } from '../../components/ContractText';
 import { FormModal } from '../../components/FormModal';
 import { pressable } from '../../utils/pressable';
 import { prepareUpload } from '../../utils/prepareUpload';
+import { useAppDialogs } from '../../hooks/useAppDialogs';
 
 const cssVars = (v: Record<string, string | number>) => v as CSSProperties;
 
@@ -79,7 +80,7 @@ function ItemRow({
 /** 新员工资料填报（免登录 H5）：进度前置 + 分组清单 + 材料识别结果核对 */
 export function OnboardingPortalPage() {
   const { token = '' } = useParams();
-  const { message, modal } = App.useApp();
+  const { message, modal } = useAppDialogs();
   const queryClient = useQueryClient();
   const [docOpen, setDocOpen] = useState(false);
   /** 打开上传弹窗时预选的材料类型（从清单项点进来时） */
