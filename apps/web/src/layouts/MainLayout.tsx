@@ -24,6 +24,7 @@ import { authApi } from '../api';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { NotificationBell } from '../components/NotificationBell';
+import { CopilotLauncher } from '../copilot/CopilotLauncher';
 import { useAuthStore } from '../stores/auth';
 import { loginUrlFor } from '../utils/redirect';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
@@ -219,6 +220,7 @@ export function MainLayout() {
           />
           <Breadcrumb items={breadcrumbItems} />
           <Space>
+            <CopilotLauncher />
             <NotificationBell />
             <Dropdown
               menu={{

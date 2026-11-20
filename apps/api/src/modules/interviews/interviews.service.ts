@@ -358,6 +358,26 @@ export class InterviewsService {
     }
   }
 
+  /** 能否对这场面试写面评（Copilot 确认保存面评草稿时复核用；与提交同一道门） */
+  async ensureCanEvaluate(interviewId: string, user: JwtUser) {
+    const interview = await this.prisma.interview.findUnique({
+      where: { id: interviewId },
+      include: {
+        interviewers: true,
+        application: {
+          include: {
+            candidate: { select: { id: true, name: true } },
+            job: { select: { title: true, departmentId: true, scorecardTemplate: true } },
+          },
+        },
+      },
+    });
+    if (!interview) throw new NotFoundException('面试不存在');
+    if (interview.status === 'CANCELED') throw new BadRequestException('该面试已取消，不可提交评价');
+    this.assertCanEvaluate(interview, user);
+    return interview;
+  }
+
   /**
    * AI 面评草稿（面试 Copilot）：
    * 面试官的原始记录 → 结构化评分卡草稿，返回给前端预填，最终由人修改确认。

@@ -10,6 +10,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ApplicationsModule } from './modules/applications/applications.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CandidatesModule } from './modules/candidates/candidates.module';
+import { CopilotModule } from './modules/copilot/copilot.module';
 import { CompanyDocsModule } from './modules/company-docs/company-docs.module';
 import { DepartmentsModule } from './modules/departments/departments.module';
 import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
@@ -44,6 +45,7 @@ import { PrismaModule } from './prisma/prisma.module';
     OffersModule,
     OnboardingModule,
     HelpdeskModule,
+    CopilotModule,
   ],
   controllers: [AppController],
   providers: [

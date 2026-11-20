@@ -106,6 +106,7 @@ model User {
   availableSlots    InterviewerSlot[]
   evaluations       Evaluation[]
   notifications     Notification[]
+  copilotConversations CopilotConversation[]
 }
 
 model Role {
@@ -300,10 +301,13 @@ model AiCallLog {
   cached       Boolean  @default(false)
   degraded     Boolean  @default(false)
   error        String?
+  /// 发起调用的内部用户（Copilot 对话按人记账；后台批量任务为空）
+  userId       String?
   createdAt    DateTime @default(now())
 
   @@index([createdAt])
   @@index([capability, createdAt])
+  @@index([userId, createdAt])
 }
 
 model InterviewInterviewer {
@@ -417,4 +421,69 @@ model ActivityLog {
   createdAt  DateTime @default(now())
 
   @@index([entityType, entityId])
+}
+
+enum CopilotActionStatus {
+  PENDING // 等待用户确认
+  EXECUTING // 已认领，正在执行（防重复确认）
+  EXECUTED
+  REJECTED // 用户取消
+  FAILED // 执行时权限 / 乐观锁 / 业务校验未通过
+  EXPIRED
+}
+
+/// AI Copilot 对话：只属于发起人本人；context 记录从哪个页面打开（候选人 / 职位），用于预置上下文
+model CopilotConversation {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String?
+  contextType String? // candidate / job
+  contextId   String?
+  messages    CopilotMessage[]
+  actions     CopilotAction[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([userId, updatedAt])
+}
+
+/// 对话消息：user / assistant（可带 toolCalls）/ tool（工具结果，已脱敏、不可信内容已装箱）
+model CopilotMessage {
+  id             String              @id @default(cuid())
+  conversationId String
+  conversation   CopilotConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String // user / assistant / tool
+  content        String              @default("")
+  toolCalls      Json? // assistant：[{ id, name, args }]
+  toolCallId     String? // tool：对应的调用 id
+  toolName       String?
+  meta           Json? // assistant：provider / degraded / aborted / usage；tool：label / summary / ok
+  createdAt      DateTime            @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+/// 写操作提案：模型只能「提议」，由用户在界面上确认后才执行；执行时重新校验权限与乐观锁
+model CopilotAction {
+  id             String              @id @default(cuid())
+  conversationId String
+  conversation   CopilotConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  messageId      String? // 发起提案的 assistant 消息
+  toolCallId     String?
+  tool           String
+  args           Json // 归一化后的执行参数（已解析 id、记下 expectedVersion）
+  summary        String
+  preview        Json? // 确认卡片展示字段
+  danger         Boolean             @default(false)
+  status         CopilotActionStatus @default(PENDING)
+  result         Json?
+  error          String?
+  expiresAt      DateTime
+  decidedAt      DateTime?
+  createdAt      DateTime            @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([userId, status])
 }

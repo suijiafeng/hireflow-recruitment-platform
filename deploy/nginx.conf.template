@@ -40,6 +40,8 @@ server {
     proxy_set_header X-Forwarded-Proto $scheme;
     # AI 生成类接口最长 60s + 重试，放宽读超时
     proxy_read_timeout 180s;
+    # Copilot 的 SSE 流：接口响应头带 X-Accel-Buffering: no，nginx 对该响应关闭缓冲、逐块转发；
+    # 服务端每 15s 发心跳注释，读超时不会在长回答中途断流
   }
 
   # 指纹化静态资源长缓存

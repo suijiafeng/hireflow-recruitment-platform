@@ -50,6 +50,7 @@ import type { BatchResult, BoardCard, BoardData, CompareData } from '../../api/t
 import { CandidateDetailDrawer } from '../../components/CandidateDetailDrawer';
 import { useDrawerParam } from '../../hooks/useUrlState';
 import { useAuthStore } from '../../stores/auth';
+import { useCopilotUi } from '../../copilot/store';
 import { pickDefaultJobId } from '../../utils/jobs';
 import { FormModal } from '../../components/FormModal';
 import { AiSourceBadge, RuleScoreMark } from '../../components/ui';
@@ -485,6 +486,7 @@ export function PipelinePage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [searchParams, setSearchParams] = useSearchParams();
   const jobId = searchParams.get('jobId') ?? '';
+  const openCopilot = useCopilotUi((st) => st.openPanel);
   const [detailId, openDetail, closeDetail] = useDrawerParam('candidate');
   const [activeCard, setActiveCard] = useState<BoardCard | null>(null);
   const [pendingRevert, setPendingRevert] = useState<PendingMove | null>(null);
@@ -867,6 +869,14 @@ export function PipelinePage() {
           </div>
           <Space size={8}>
             {!canMove && <span className="pipeline-readonly-tip">仅查看</span>}
+            {jobId && (
+              <Button
+                icon={<RobotOutlined />}
+                onClick={() => openCopilot({ context: { type: 'job', id: jobId }, prompt: '这个职位的看板进展如何？' })}
+              >
+                问 Copilot
+              </Button>
+            )}
             {canMove && (
               <Button icon={<CheckSquareOutlined />} onClick={() => setBatchMode(true)}>
                 批量操作

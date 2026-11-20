@@ -6,5 +6,6 @@ import { InterviewsService } from './interviews.service';
 @Module({
   controllers: [InterviewsController, InterviewerSlotsController, InterviewPortalController],
   providers: [InterviewsService],
+  exports: [InterviewsService],
 })
 export class InterviewsModule {}

@@ -27,6 +27,7 @@ import { applicationsApi, boardApi, candidatesApi, jobsApi, offersApi, resumesAp
 import { extractErrorMessage, isConflictError, isTimeoutError, TIMEOUT_MESSAGE } from '../api/client';
 import type { ActivityItem, CandidateDetail, DetailApplication, Interview, Resume } from '../api/types';
 import { useAuthStore } from '../stores/auth';
+import { useCopilotUi } from '../copilot/store';
 import { EvaluationModal } from './EvaluationModal';
 import { ScheduleInterviewModal } from './ScheduleInterviewModal';
 import { FormModal } from './FormModal';
@@ -80,6 +81,7 @@ const ACTION_LABEL: Record<string, string> = {
   'contract.sent': '合同发送签署',
   'contract.signed': '合同签署完成',
   'webhook.fired': '自动化通知（Webhook）',
+  'candidate.note_added': '添加备注',
 };
 
 const CONCLUSION_TAG: Record<string, string> = {
@@ -359,6 +361,9 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
+  const openCopilot = useCopilotUi((s) => s.openPanel);
+  // Copilot 侧栏叠在本抽屉之上时放开焦点锁定，否则输入框的焦点会被抽屉抢回去
+  const copilotOpen = useCopilotUi((s) => s.open);
 
   const [tab, setTab] = useState<Tab>('applications');
   const [scheduleFor, setScheduleFor] = useState<{ id: string; rounds: number } | null>(null);
@@ -522,6 +527,7 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
       size={760}
       open={Boolean(candidateId)}
       onClose={onClose}
+      focusable={{ trap: !copilotOpen }}
       destroyOnHidden
       title={
         !detail ? (
@@ -549,6 +555,12 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                 </div>
               </div>
               <div className="hf-bar-right">
+                <Button
+                  icon={<RobotOutlined />}
+                  onClick={() => openCopilot({ context: { type: 'candidate', id: detail.id } })}
+                >
+                  问 Copilot
+                </Button>
                 {hasPermission(PERMISSIONS.APPLICATION_CREATE) && (
                   <Button icon={<PlusOutlined />} onClick={() => setApplyOpen(true)}>
                     加入职位
@@ -638,6 +650,12 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                     {item.action === 'application.stage_changed' && item.payload && (
                       <div className="hf-tl-extra">
                         {String(item.payload.from)} → {String(item.payload.to)}
+                      </div>
+                    )}
+                    {item.action === 'candidate.note_added' && item.payload && (
+                      <div className="hf-tl-extra">
+                        {String(item.payload.note)}
+                        {item.payload.via === 'copilot' && <span className="hf-faint">（经 Copilot 确认添加）</span>}
                       </div>
                     )}
                   </div>
@@ -755,6 +773,12 @@ export function CandidateDetailDrawer({ candidateId, onClose }: Props) {
                       {item.action === 'application.stage_changed' && item.payload && (
                         <div className="hf-tl-extra">
                           {String(item.payload.from)} → {String(item.payload.to)}
+                        </div>
+                      )}
+                      {item.action === 'candidate.note_added' && item.payload && (
+                        <div className="hf-tl-extra">
+                          {String(item.payload.note)}
+                          {item.payload.via === 'copilot' && <span className="hf-faint">（经 Copilot 确认添加）</span>}
                         </div>
                       )}
                     </div>
