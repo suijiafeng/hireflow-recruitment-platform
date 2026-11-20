@@ -93,6 +93,7 @@ export interface CandidateApplicationBrief {
   status: ApplicationStatus;
   /** 候选人库列表用它显示匹配分；接口一直有返回，之前类型漏了 */
   matchScore?: number | null;
+  matchSource?: MatchSource | null;
 }
 
 export interface Candidate {
@@ -138,9 +139,11 @@ export interface Resume {
   fileName: string | null;
   fileKey: string | null;
   parseStatus: string;
+  /** 最近一次进入 PARSING 的时间；超过 2 分钟仍是 PARSING 视为中断，可重试 */
+  parseStartedAt?: string | null;
   skills: string[];
   rawText: string | null;
-  parsed: { summary?: string } | null;
+  parsed: { summary?: string; injectionSuspected?: boolean; aiMeta?: AiMeta } | null;
   createdAt: string;
 }
 
@@ -178,6 +181,8 @@ export interface DetailApplication {
   stage: { id: string; name: string };
   status: ApplicationStatus;
   matchScore: number | null;
+  /** 分数口径：ai = 大模型；rule = 规则引擎（未配模型或降级）；旧数据为空 */
+  matchSource?: MatchSource | null;
   matchReport?: MatchReport | null;
   /** 终态应聘的淘汰原因码；接口一直有返回，之前类型漏了 */
   rejectReason?: string | null;
@@ -195,6 +200,39 @@ export interface CandidateDetail extends Candidate {
 export interface AiMeta {
   provider: string;
   degraded: boolean;
+  cached?: boolean;
+}
+
+export type MatchSource = 'ai' | 'rule';
+
+export interface AiStatus {
+  provider: string;
+  mode: 'llm' | 'mock';
+  label: string;
+  models: { smart: string; fast: string } | null;
+  promptVersion: string;
+  timeoutMs: number;
+  deadlineMs: number;
+  maxConcurrency: number;
+}
+
+export interface AiUsageSummary {
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number | null;
+  unpricedCalls: number;
+  p95LatencyMs: number | null;
+  cacheHitRate: number;
+  degradeRate: number;
+}
+
+export interface AiUsage {
+  days: number;
+  since: string;
+  status: AiStatus;
+  total: AiUsageSummary;
+  byCapability: Array<AiUsageSummary & { capability: string }>;
 }
 
 export interface MatchReport {
@@ -203,6 +241,9 @@ export interface MatchReport {
   misses: string[];
   highlights: string;
   risks: string;
+  /** 经过原文核对的命中证据 */
+  evidence?: Array<{ requirement: string; quote: string }>;
+  injectionSuspected?: boolean;
   aiMeta?: AiMeta;
 }
 
@@ -253,6 +294,7 @@ export interface BoardCard {
   id: string;
   status: ApplicationStatus;
   matchScore: number | null;
+  matchSource?: MatchSource | null;
   position: number;
   createdAt: string;
   stageId: string;
@@ -556,6 +598,8 @@ export interface TalentPoolRecommendation {
   hits: string[];
   highlights: string;
   aiMeta: AiMeta;
+  /** false = 降级到规则引擎的分数，口径不同，排在大模型结果之后、不参与排序 */
+  ranked?: boolean;
   lastApplication: {
     jobTitle: string;
     status: string;
@@ -567,8 +611,16 @@ export interface TalentPoolRecommendation {
 export interface TalentPoolScanResult {
   job: { id: string; title: string };
   scanned: number;
+  /** 粗排后实际交给大模型精排的人数 */
+  aiScored?: number;
+  /** 超出时间预算未评估的人数 */
+  skipped?: number;
+  degraded?: number;
   recommendations: TalentPoolRecommendation[];
 }
+
+/** 单人评分结果；degradedKept = 本次降级，保留了原来的大模型分数 */
+export type ScoreResult = BoardCard & { matchReport?: MatchReport | null; aiMeta: AiMeta; degradedKept?: boolean };
 
 /** 批量操作结果（部分失败不回滚，错误报告模式） */
 export interface BatchResult {

@@ -198,36 +198,38 @@ model Candidate {
 }
 
 model Resume {
-  id          String            @id @default(cuid())
-  candidateId String
-  candidate   Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  fileKey     String? // 对象存储 key（文件上传后续接入）
-  fileName    String?
-  rawText     String?
-  parsed      Json? // AI 解析后的结构化 JSON（二期）
-  skills      String[]
-  parseStatus ResumeParseStatus @default(PENDING)
-  createdAt   DateTime          @default(now())
+  id             String            @id @default(cuid())
+  candidateId    String
+  candidate      Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  fileKey        String? // 对象存储 key（文件上传后续接入）
+  fileName       String?
+  rawText        String?
+  parsed         Json? // AI 解析后的结构化 JSON（二期）
+  skills         String[]
+  parseStatus    ResumeParseStatus @default(PENDING)
+  parseStartedAt DateTime? // 最近一次进入 PARSING 的时间：并发去重 + 进程中途挂掉后可超时重试
+  createdAt      DateTime          @default(now())
 }
 
 // 应聘记录：连接 Candidate 与 Job，驱动 Pipeline
 model Application {
-  id          String            @id @default(cuid())
-  candidateId String
-  candidate   Candidate         @relation(fields: [candidateId], references: [id])
-  jobId       String
-  job         Job               @relation(fields: [jobId], references: [id])
-  stageId     String
-  stage       PipelineStage     @relation(fields: [stageId], references: [id])
+  id             String            @id @default(cuid())
+  candidateId    String
+  candidate      Candidate         @relation(fields: [candidateId], references: [id])
+  jobId          String
+  job            Job               @relation(fields: [jobId], references: [id])
+  stageId        String
+  stage          PipelineStage     @relation(fields: [stageId], references: [id])
   status         ApplicationStatus @default(ACTIVE)
   matchScore     Int? // AI 匹配度分数（二期）
   matchReport    Json? // 打分依据（二期）
+  matchSource    String? // 分数口径：ai = 大模型评分；rule = 规则引擎（未配模型或降级），列表/看板据此标注
   position       Float             @default(0) // 看板列内排序
   stageEnteredAt DateTime          @default(now()) // 进入当前阶段时间（停留时长/SLA）
   version        Int               @default(0) // 乐观锁：并发拖卡冲突检测
   rejectReason   String? // 淘汰/撤回原因码（原因码强制）
   prescreen      Json? // AI 预筛问答（薪资/到岗/出差 + 提交时间 + 硬性条件核验结果）
-  prescreenToken String? @unique // 预筛免登录 H5 令牌
+  prescreenToken String?           @unique // 预筛免登录 H5 令牌
   interviews     Interview[]
   offer          Offer?
   onboarding     Onboarding?
@@ -278,6 +280,25 @@ model AiCache {
   createdAt  DateTime @default(now())
 
   @@unique([capability, hash])
+}
+
+// AI 调用日志：每次能力调用一行（含缓存命中与降级），用于用量 / 成本 / 延迟面板
+model AiCallLog {
+  id           String   @id @default(cuid())
+  capability   String // parseResume / scoreMatch …
+  provider     String // anthropic / deepseek / qwen / mock …
+  model        String?
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  costUsd      Float? // 估算成本，未知模型为空
+  latencyMs    Int
+  cached       Boolean  @default(false)
+  degraded     Boolean  @default(false)
+  error        String?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([capability, createdAt])
 }
 
 model InterviewInterviewer {

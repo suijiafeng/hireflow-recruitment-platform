@@ -29,6 +29,7 @@ const CARD_SELECT = {
   id: true,
   status: true,
   matchScore: true,
+  matchSource: true,
   position: true,
   createdAt: true,
   stageId: true,
@@ -78,10 +79,24 @@ export class ApplicationsService {
       candidateTags: application.candidate.tags,
     });
 
+    // 分数口径：大模型 = ai；规则引擎（未配模型或本次降级）= rule。
+    // 降级时如果已有一份大模型分数，不拿规则分去覆盖它——列表 / 看板只显示一个数，混口径会误导排序
+    const source = meta.provider === 'mock' ? 'rule' : 'ai';
+    const keepExisting = meta.degraded && application.matchSource === 'ai' && application.matchScore != null;
+    if (keepExisting) {
+      this.logger.warn(`应聘 ${id} 本次评分降级到规则引擎，保留原大模型分数 ${application.matchScore}`);
+      const current = await this.prisma.application.findUniqueOrThrow({
+        where: { id },
+        select: { ...CARD_SELECT, matchReport: true },
+      });
+      return { ...current, aiMeta: meta, degradedKept: true };
+    }
+
     const updated = await this.prisma.application.update({
       where: { id },
       data: {
         matchScore: data.score,
+        matchSource: source,
         matchReport: { ...data, aiMeta: meta } as unknown as Prisma.InputJsonValue,
       },
       select: { ...CARD_SELECT, matchReport: true },
@@ -91,6 +106,8 @@ export class ApplicationsService {
       job: application.job.title,
       score: data.score,
       provider: meta.provider,
+      source,
+      ...(data.injectionSuspected ? { injectionSuspected: true } : {}),
     });
     return { ...updated, aiMeta: meta };
   }

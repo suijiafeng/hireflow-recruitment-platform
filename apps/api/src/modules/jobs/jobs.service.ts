@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ACTIVITY_ACTIONS, DEFAULT_PIPELINE_STAGES } from '@hireflow/shared';
+import { mapWithConcurrency } from '../../common/concurrency';
 import { departmentScopeOf, inDepartmentScope, isAssignedScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
 import type { Prisma } from '../../generated/prisma/client';
@@ -12,8 +13,20 @@ import { QueryJobsDto } from './dto/query-jobs.dto';
 import { UpdateJobDto } from './dto/update-job.dto';
 import { UpdateStagesDto } from './dto/update-stages.dto';
 
-/** 人才库唤醒单次扫描上限：真实 AI 引擎下控 Token 成本（mock 引擎零成本） */
-const TALENT_POOL_SCAN_LIMIT = 20;
+/** 人才库唤醒：候选池上限（粗排是纯本地计算，可以多扫一些） */
+const TALENT_POOL_SCAN_LIMIT = 40;
+/** 粗排后只把前 N 名交给大模型精排：控 token 成本，也让结果在前端超时之前回来 */
+export const TALENT_POOL_AI_TOP = 10;
+/** 同时在途的大模型请求数（AiService 另有全局上限，这里再收一道，避免一次扫描占满全局配额） */
+export const TALENT_POOL_CONCURRENCY = 3;
+/** 整体时间预算：超过后剩余候选人不再发起新的模型请求（已在途的仍受单次截止时间约束） */
+export const TALENT_POOL_BUDGET_MS = 45_000;
+
+/** 粗排分：候选人标签在职位文本里出现的个数（大小写不敏感）。零成本，只用于决定谁值得花 token 精排 */
+export function coarseTagScore(tags: string[], jobText: string): number {
+  const text = jobText.toLowerCase();
+  return tags.filter((t) => t && text.includes(t.toLowerCase())).length;
+}
 
 @Injectable()
 export class JobsService {
@@ -315,12 +328,24 @@ export class JobsService {
       take: TALENT_POOL_SCAN_LIMIT,
     });
 
-    // allSettled：单个候选人打分失败（如 AI 服务瞬时抖动）不拖累其余已成功的结果
-    const settled = await Promise.allSettled(
-      pool.map(async (candidate) => {
+    // 两段式：先按标签粗排（本地、零成本），只对前 N 名调用大模型精排；并发受限，整体有时间预算
+    const jobText = [job.title, job.description ?? '', job.requirement ?? ''].join('\n');
+    const evaluable = pool
+      .map((candidate, i) => ({ candidate, i, coarse: coarseTagScore(candidate.tags, jobText) }))
+      .filter(({ candidate }) => {
+        const resume = candidate.resumes[0];
+        return Boolean(resume?.rawText || resume?.parsed || candidate.tags.length);
+      })
+      .sort((a, b) => b.coarse - a.coarse || a.i - b.i)
+      .slice(0, TALENT_POOL_AI_TOP);
+
+    const startedAt = Date.now();
+    const settled = await mapWithConcurrency(
+      evaluable,
+      TALENT_POOL_CONCURRENCY,
+      async ({ candidate }) => {
         const resume = candidate.resumes[0];
         const resumeText = resume?.rawText ?? (resume?.parsed ? JSON.stringify(resume.parsed) : '');
-        if (!resumeText && candidate.tags.length === 0) return null; // 无简历无标签，不可评估
         const { data, meta } = await this.ai.scoreMatch({
           jobTitle: job.title,
           jobDescription: job.description ?? '',
@@ -340,6 +365,8 @@ export class JobsService {
           hits: data.hits.slice(0, 4),
           highlights: data.highlights,
           aiMeta: meta,
+          // 降级（规则引擎）打的分和大模型不是一个口径：单独标出，排在大模型结果之后，不混排
+          ranked: !meta.degraded,
           lastApplication: last
             ? {
                 jobTitle: last.job.title,
@@ -349,24 +376,44 @@ export class JobsService {
               }
             : null,
         };
-      }),
+      },
+      () => Date.now() - startedAt < TALENT_POOL_BUDGET_MS,
     );
+    let skipped = 0;
     const scored = settled.map((r, i) => {
       if (r.status === 'fulfilled') return r.value;
-      this.logger.warn(`人才库唤醒打分失败（候选人 ${pool[i].id}）：${r.reason instanceof Error ? r.reason.message : r.reason}`);
+      if (r.status === 'skipped') {
+        skipped++;
+        return null;
+      }
+      this.logger.warn(
+        `人才库唤醒打分失败（候选人 ${evaluable[i].candidate.id}）：${r.reason instanceof Error ? r.reason.message : r.reason}`,
+      );
       return null;
     });
-    const recommendations = scored
-      .filter((r): r is NonNullable<typeof r> => r !== null)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
+    const ok = scored.filter((r): r is NonNullable<typeof r> => r !== null);
+    const byScore = (a: { score: number }, b: { score: number }) => b.score - a.score;
+    const recommendations = [
+      ...ok.filter((r) => r.ranked).sort(byScore),
+      ...ok.filter((r) => !r.ranked).sort(byScore),
+    ].slice(0, 10);
+    const degraded = ok.filter((r) => !r.ranked).length;
 
     await this.activityLog.record(user, ACTIVITY_ACTIONS.TALENT_POOL_SCANNED, 'Job', jobId, {
       job: job.title,
       scanned: pool.length,
+      aiScored: evaluable.length - skipped,
       recommended: recommendations.length,
+      degraded,
     });
-    return { job: { id: job.id, title: job.title }, scanned: pool.length, recommendations };
+    return {
+      job: { id: job.id, title: job.title },
+      scanned: pool.length,
+      aiScored: evaluable.length - skipped,
+      skipped,
+      degraded,
+      recommendations,
+    };
   }
 
   /** 唤醒激活：为历史候选人在本职位生成新应聘进入首列（复用创建守卫；同职位重复会 409 由前端提示） */

@@ -1,6 +1,10 @@
 import type { AuthUser } from '../stores/auth';
-import { http } from './client';
+import { AI_BATCH_TIMEOUT_MS, aiRequest, http } from './client';
 import type {
+  AiMeta,
+  AiStatus,
+  AiUsage,
+  ScoreResult,
   AnalyticsOverview,
   ApplicationCreateResult,
   CreateRoleInput,
@@ -89,7 +93,7 @@ export const jobsApi = {
   ) => http.patch<Job>(`/jobs/${id}`, data).then((r) => r.data),
   remove: (id: string) => http.delete<{ ok: true }>(`/jobs/${id}`).then((r) => r.data),
   talentPoolScan: (jobId: string) =>
-    http.post<TalentPoolScanResult>(`/jobs/${jobId}/talent-pool/scan`).then((r) => r.data),
+    http.post<TalentPoolScanResult>(`/jobs/${jobId}/talent-pool/scan`, undefined, { timeout: AI_BATCH_TIMEOUT_MS }).then((r) => r.data),
   talentPoolActivate: (jobId: string, candidateId: string) =>
     http.post<ApplicationCreateResult>(`/jobs/${jobId}/talent-pool/activate`, { candidateId }).then((r) => r.data),
 };
@@ -133,21 +137,25 @@ export const candidatesApi = {
 export const applicationsApi = {
   create: (data: { candidateId: string; jobId: string }) =>
     http.post<ApplicationCreateResult>('/applications', data).then((r) => r.data),
-  score: (id: string) => http.post<BoardCard>(`/applications/${id}/score`).then((r) => r.data),
+  score: (id: string) => http.post<ScoreResult>(`/applications/${id}/score`, undefined, aiRequest).then((r) => r.data),
   compare: (ids: string[]) =>
-    http.post<CompareData>('/applications/compare', { ids }).then((r) => r.data),
+    http.post<CompareData>('/applications/compare', { ids }, aiRequest).then((r) => r.data),
   prescreenLink: (id: string) =>
     http.post<{ token: string }>(`/applications/${id}/prescreen-link`).then((r) => r.data),
 };
 
 export const resumesApi = {
-  parse: (id: string) => http.post<Resume>(`/resumes/${id}/parse`).then((r) => r.data),
+  parse: (id: string) => http.post<Resume & { aiMeta?: AiMeta }>(`/resumes/${id}/parse`, undefined, aiRequest).then((r) => r.data),
   fileUrl: (id: string) => http.get<{ url: string }>(`/resumes/${id}/file-url`).then((r) => r.data),
 };
 
 export const aiApi = {
+  /** 当前 AI 引擎（供应商 / 模型），任何登录用户可读 */
+  status: () => http.get<AiStatus>('/ai/status').then((r) => r.data),
+  /** 用量面板（需要系统配置权限） */
+  usage: (days = 7) => http.get<AiUsage>('/ai/usage', { params: { days } }).then((r) => r.data),
   generateJd: (data: { title: string; departmentName?: string; keywords?: string }) =>
-    http.post<JdDraft>('/ai/generate-jd', data).then((r) => r.data),
+    http.post<JdDraft>('/ai/generate-jd', data, aiRequest).then((r) => r.data),
 };
 
 export const offersApi = {
@@ -175,7 +183,7 @@ export const offersApi = {
     http.post<{ token: string }>(`/offers/${id}/portal-link`, { rotate }).then((r) => r.data),
   respond: (id: string, decision: 'ACCEPTED' | 'DECLINED', reason?: string) =>
     http.post<Offer>(`/offers/${id}/respond`, { decision, reason }).then((r) => r.data),
-  retention: (id: string) => http.post<RetentionHint>(`/offers/${id}/retention`).then((r) => r.data),
+  retention: (id: string) => http.post<RetentionHint>(`/offers/${id}/retention`, undefined, aiRequest).then((r) => r.data),
 };
 
 /** 候选人/新员工免登录门户（链接即凭证，不带 JWT） */
@@ -252,7 +260,7 @@ export const onboardingApi = {
 };
 
 export const helpdeskApi = {
-  ask: (question: string) => http.post<HelpdeskAnswer>('/helpdesk/ask', { question }).then((r) => r.data),
+  ask: (question: string) => http.post<HelpdeskAnswer>('/helpdesk/ask', { question }, aiRequest).then((r) => r.data),
   docs: () =>
     http
       .get<Array<{ id: string; title: string; tags: string[] }>>('/helpdesk/docs')
@@ -264,7 +272,7 @@ export const analyticsApi = {
   todos: () => http.get<TodoSummary>('/analytics/todos').then((r) => r.data),
   funnel: (jobId: string) => http.get<FunnelData>(`/analytics/funnel/${jobId}`).then((r) => r.data),
   insight: (jobId: string) =>
-    http.post<{ insight: string; aiMeta: { provider: string } }>(`/analytics/insight/${jobId}`).then((r) => r.data),
+    http.post<{ insight: string; aiMeta: { provider: string } }>(`/analytics/insight/${jobId}`, undefined, aiRequest).then((r) => r.data),
   trend: () => http.get<TrendData>('/analytics/trend').then((r) => r.data),
   /** range/deptId 按「应聘创建时间」划同期群；五组指标共用同一口径，响应 scope 回显实际生效范围 */
   insights: (params?: { range?: InsightsRange; deptId?: string }) =>
@@ -294,7 +302,7 @@ export const interviewsApi = {
   ) => http.post(`/interviews/${interviewId}/evaluations`, data).then((r) => r.data),
   draftEvaluation: (interviewId: string, notes: string) =>
     http
-      .post<EvaluationDraft>(`/interviews/${interviewId}/evaluation-draft`, { notes })
+      .post<EvaluationDraft>(`/interviews/${interviewId}/evaluation-draft`, { notes }, aiRequest)
       .then((r) => r.data),
   cancel: (interviewId: string) =>
     http.post<Interview>(`/interviews/${interviewId}/cancel`).then((r) => r.data),

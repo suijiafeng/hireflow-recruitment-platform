@@ -8,6 +8,7 @@ import { ScheduleInterviewDto } from './dto/schedule-interview.dto';
 import { DraftEvaluationDto } from './dto/draft-evaluation.dto';
 import { SubmitEvaluationDto } from './dto/submit-evaluation.dto';
 import { InterviewsService } from './interviews.service';
+import { AiRateLimit } from '../../common/guards/ai-throttle.guard';
 
 @ApiTags('interviews')
 @ApiBearerAuth()
@@ -44,6 +45,7 @@ export class InterviewsController {
   }
 
   @Post(':id/evaluation-draft')
+  @AiRateLimit()
   @RequirePermissions(PERMISSIONS.EVALUATION_SUBMIT)
   @ApiOperation({ summary: 'AI 生成面评草稿（不落库，供表单预填后人工确认）' })
   draftEvaluation(@Param('id') id: string, @Body() dto: DraftEvaluationDto, @CurrentUser() user: JwtUser) {

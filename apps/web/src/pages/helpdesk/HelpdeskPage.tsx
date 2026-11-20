@@ -11,9 +11,10 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { App, Button, Input, Popconfirm, Spin } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useRef, useState } from 'react';
-import { helpdeskApi } from '../../api';
+import { aiApi, helpdeskApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import { EmptyBlock } from '../../components/ui';
+import { providerLabel } from '../../utils/aiProvider';
 import { pressable } from '../../utils/pressable';
 
 interface ChatMessage {
@@ -123,6 +124,8 @@ export function HelpdeskPage() {
   });
 
   const docsQuery = useQuery({ queryKey: ['helpdesk-docs'], queryFn: helpdeskApi.docs });
+  // 标题显示当前真实接入的引擎，而不是在提问前固定写「规则引擎」
+  const aiStatus = useQuery({ queryKey: ['ai-status'], queryFn: aiApi.status, staleTime: 5 * 60_000 });
 
   const ask = (question: string) => {
     const q = question.trim();
@@ -170,7 +173,7 @@ export function HelpdeskPage() {
               </span>
               <span className="u-flex-gap-12">
                 <span className="hf-faint">
-                  {lastProvider === 'mock' ? '规则引擎' : (lastProvider ?? '规则引擎')} · 仅依据制度文档作答
+                  {[providerLabel(aiStatus.data?.label ?? lastProvider), '仅依据制度文档作答'].filter(Boolean).join(' · ')}
                 </span>
                 {messages.length > 0 && (
                   <Popconfirm title="清空当前对话记录？" okText="清空" onConfirm={clearChat}>

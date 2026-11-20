@@ -8,6 +8,7 @@ import { QueryJobsDto } from './dto/query-jobs.dto';
 import { UpdateJobDto } from './dto/update-job.dto';
 import { UpdateStagesDto } from './dto/update-stages.dto';
 import { JobsService } from './jobs.service';
+import { AiRateLimit } from '../../common/guards/ai-throttle.guard';
 
 @ApiTags('jobs')
 @ApiBearerAuth()
@@ -65,6 +66,7 @@ export class JobsController {
   }
 
   @Post(':id/talent-pool/scan')
+  @AiRateLimit()
   @RequirePermissions(PERMISSIONS.APPLICATION_CREATE)
   @ApiOperation({ summary: '人才库唤醒：历史候选人按本职位 AI 打分推荐 Top 10' })
   talentPoolScan(@Param('id') id: string, @CurrentUser() user: JwtUser) {

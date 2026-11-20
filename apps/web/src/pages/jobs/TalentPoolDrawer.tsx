@@ -63,7 +63,15 @@ export function TalentPoolDrawer({ job, onClose }: { job: Job | null; onClose: (
             showIcon
             className="u-mb-16"
             title={`已扫描 ${result.scanned} 位历史淘汰/撤回候选人，按匹配度推荐 ${result.recommendations.length} 位`}
-            description={result.recommendations[0]?.aiMeta.degraded ? 'AI 引擎降级中，结果由规则引擎生成' : undefined}
+            description={[
+              result.aiScored != null && result.aiScored < result.scanned
+                ? `先按标签粗排，只对最相关的 ${result.aiScored} 位做 AI 精排`
+                : '',
+              result.degraded ? `${result.degraded} 位因 AI 引擎降级由规则引擎估算，已排在后面、不参与排序` : '',
+              result.skipped ? `${result.skipped} 位超出本次时间预算未评估，可稍后重试` : '',
+            ]
+              .filter(Boolean)
+              .join('；') || undefined}
           />
           {result.recommendations.map((rec) => (
             <Card key={rec.candidate.id} size="small" className="u-mb-16 talent-pool-card">
@@ -73,6 +81,7 @@ export function TalentPoolDrawer({ job, onClose }: { job: Job | null; onClose: (
                   <Tag color={rec.score >= 85 ? 'success' : rec.score >= 70 ? 'processing' : 'default'}>
                     匹配 {rec.score}
                   </Tag>
+                  {rec.ranked === false && <Tag className="tag-meta">规则估算 · 未参与排序</Tag>}
                 </Space>
                 <Button
                   size="small"
