@@ -16,6 +16,10 @@ RUN npm ci
 
 # ---- 构建层：只需 shared → web（api 镜像见 Dockerfile.api，构建互不影响）----
 FROM deps AS build
+# 演示模式（登录页展示演示账号）构建期开关，默认关闭；公开演示站构建时传 --build-arg VITE_DEMO_MODE=true。
+# 关闭时演示账号与密码不会进入产物（见 apps/web/src/utils/demo.ts）
+ARG VITE_DEMO_MODE=false
+ENV VITE_DEMO_MODE=$VITE_DEMO_MODE
 COPY packages/shared packages/shared
 COPY apps/web apps/web
 RUN npm run build:shared && npm run build -w apps/web
