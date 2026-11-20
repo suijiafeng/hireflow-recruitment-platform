@@ -57,7 +57,7 @@ function lazyPage<T>(load: () => Promise<T>, name: keyof T) {
   };
 }
 
-/** 首页按权限落到第一个可见菜单（面试官/IT 无数据大盘权限，不能硬跳 /dashboard） */
+/** 首页按权限落到第一个可见页签（面试官没有看板权限，不能硬跳 /pipeline） */
 function HomeRedirect() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   return <Navigate to={firstVisiblePath(hasPermission)} replace />;
@@ -69,20 +69,10 @@ export const router = createBrowserRouter([
     errorElement: <RouteErrorPage />,
     children: [
       { path: '/login', lazy: lazyPage(() => import('./pages/Login'), 'LoginPage') },
-      // 候选人/新员工免登录门户（链接即凭证，不走 MainLayout 鉴权）
-      { path: '/portal/offer/:token', lazy: lazyPage(() => import('./pages/portal/OfferPortalPage'), 'OfferPortalPage') },
-      {
-        path: '/portal/onboarding/:token',
-        lazy: lazyPage(() => import('./pages/portal/OnboardingPortalPage'), 'OnboardingPortalPage'),
-      },
-      {
-        path: '/portal/interview/:token',
-        lazy: lazyPage(() => import('./pages/portal/InterviewPortalPage'), 'InterviewPortalPage'),
-      },
-      {
-        path: '/portal/prescreen/:token',
-        lazy: lazyPage(() => import('./pages/portal/PrescreenPortalPage'), 'PrescreenPortalPage'),
-      },
+      // 候选人页：免登录，链接即凭证，不走 MainLayout 鉴权
+      { path: '/portal/:token', lazy: lazyPage(() => import('./pages/portal/PortalPage'), 'PortalPage') },
+      // 旧版分开的四个门户地址已下线：给出「链接无效」，不跳到登录页
+      { path: '/portal/*', lazy: lazyPage(() => import('./pages/portal/PortalLinkError'), 'RetiredPortalLink') },
       {
         path: '/',
         lazy: lazyPage(() => import('./layouts/MainLayout'), 'MainLayout'),
@@ -100,7 +90,6 @@ export const router = createBrowserRouter([
               { path: 'interviews', lazy: lazyPage(() => import('./pages/interviews/InterviewsPage'), 'InterviewsPage') },
               { path: 'offers', lazy: lazyPage(() => import('./pages/offers/OffersPage'), 'OffersPage') },
               { path: 'onboarding', lazy: lazyPage(() => import('./pages/onboarding/OnboardingPage'), 'OnboardingPage') },
-              { path: 'helpdesk', lazy: lazyPage(() => import('./pages/helpdesk/HelpdeskPage'), 'HelpdeskPage') },
               { path: 'settings', lazy: lazyPage(() => import('./pages/settings/SettingsPage'), 'SettingsPage') },
             ],
           },

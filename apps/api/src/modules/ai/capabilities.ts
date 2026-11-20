@@ -13,7 +13,6 @@ export type AiCapability =
   | 'draftEvaluation'
   | 'funnelInsight'
   | 'answerQuestion'
-  | 'predictRetention'
   | 'compareCandidates';
 
 /** 按能力分档：两三句话的诊断/问答不需要大模型 + 深度思考 */
@@ -21,7 +20,6 @@ export const CAPABILITY_TIER: Record<AiCapability, ModelTier> = {
   generateJd: 'fast',
   funnelInsight: 'fast',
   answerQuestion: 'fast',
-  predictRetention: 'fast',
   parseResume: 'smart',
   scoreMatch: 'smart',
   draftEvaluation: 'smart',

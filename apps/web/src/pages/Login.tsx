@@ -84,7 +84,7 @@ export function LoginPage() {
   const [remember, setRemember] = useState(true);
   /** 429 倒计时（秒）：按钮禁用并显示「N 秒后可重试」 */
   const [retryIn, setRetryIn] = useState(0);
-  useDocumentTitle('登录 · ART 智能招聘');
+  useDocumentTitle('登录 · HireFlow 招聘');
 
   // 被动登出原因：读一次就清掉，以 info toast 告知（StrictMode 下第二次读到的是空，不会重复弹）
   useEffect(() => {
@@ -143,9 +143,9 @@ export function LoginPage() {
         <section className="login-card" aria-labelledby="login-title">
           <header className="login-head">
             <div className="login-logo" aria-hidden="true">
-              A
+              H
             </div>
-            <h1 id="login-title">ART 智能招聘</h1>
+            <h1 id="login-title">HireFlow 招聘</h1>
             <p>
               每一位候选人，都在<em>同一条流水线</em>上
             </p>
@@ -158,7 +158,7 @@ export function LoginPage() {
             onFinish={login}
             initialValues={{
               // 只有开发环境预填；生产（即使开了演示模式）一律不预填密码
-              ...(import.meta.env.DEV && DEMO_MODE ? { email: 'admin@arthr.local', password: 'Admin@123456' } : {}),
+              ...(import.meta.env.DEV && DEMO_MODE ? { email: 'admin@hireflow.local', password: 'Admin@123456' } : {}),
               ...(rememberedEmail ? { email: rememberedEmail } : {}),
             }}
           >
@@ -213,7 +213,7 @@ export function LoginPage() {
       </main>
 
       <footer className="login-foot">
-        <span>© 2026 ART 智能招聘</span>
+        <span>© 2026 HireFlow</span>
         <span>简历 · 面试 · 录用 · 入职</span>
       </footer>
     </div>

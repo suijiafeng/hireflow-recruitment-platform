@@ -1,11 +1,10 @@
-import { Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSIONS } from '@hireflow/shared';
 import { CurrentUser, type JwtUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { AnalyticsService } from './analytics.service';
 import { QueryInsightsDto } from './dto/query-insights.dto';
-import { AiRateLimit } from '../../common/guards/ai-throttle.guard';
 
 @ApiTags('analytics')
 @ApiBearerAuth()
@@ -31,14 +30,6 @@ export class AnalyticsController {
   @ApiOperation({ summary: '职位招聘漏斗（人数与转化率）' })
   funnel(@Param('jobId') jobId: string, @CurrentUser() user: JwtUser) {
     return this.analyticsService.funnel(jobId, user);
-  }
-
-  @Post('insight/:jobId')
-  @AiRateLimit()
-  @RequirePermissions(PERMISSIONS.DASHBOARD_VIEW)
-  @ApiOperation({ summary: 'AI 招聘健康度诊断' })
-  insight(@Param('jobId') jobId: string, @CurrentUser() user: JwtUser) {
-    return this.analyticsService.insight(jobId, user);
   }
 
   @Get('trend')

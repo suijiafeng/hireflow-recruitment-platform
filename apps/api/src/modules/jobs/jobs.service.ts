@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ACTIVITY_ACTIONS, DEFAULT_PIPELINE_STAGES } from '@hireflow/shared';
+import { ACTIVITY_ACTIONS, DEFAULT_PIPELINE_STAGES, StageKind, SYSTEM_STAGE_KINDS } from '@hireflow/shared';
 import { mapWithConcurrency } from '../../common/concurrency';
 import { departmentScopeOf, inDepartmentScope, isAssignedScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
@@ -51,7 +51,7 @@ export class JobsService {
       page,
       pageSize,
       items: [] as Array<never>,
-      summary: { open: 0, pendingApproval: 0, headcount: 0, hcUsed: 0, inFlow: 0 },
+      summary: { open: 0, draft: 0, headcount: 0, hcUsed: 0, inFlow: 0 },
     };
     // 显式选了范围外的部门：空结果，不把汇总放宽到其他部门
     if (departmentId && !inDepartmentScope(deptScope, departmentId)) return empty;
@@ -68,7 +68,7 @@ export class JobsService {
       ...summaryWhere,
       ...(status ? { status } : {}),
     };
-    const [total, items, open, pendingApproval, headcountAgg, hcUsed, inFlow] = await this.prisma.$transaction([
+    const [total, items, open, draft, headcountAgg, hcUsed, inFlow] = await this.prisma.$transaction([
       this.prisma.job.count({ where }),
       this.prisma.job.findMany({
         where,
@@ -82,7 +82,7 @@ export class JobsService {
         take: pageSize,
       }),
       this.prisma.job.count({ where: { ...summaryWhere, status: 'OPEN' } }),
-      this.prisma.job.count({ where: { ...summaryWhere, status: 'PENDING_APPROVAL' } }),
+      this.prisma.job.count({ where: { ...summaryWhere, status: 'DRAFT' } }),
       this.prisma.job.aggregate({ where: summaryWhere, _sum: { headcount: true } }),
       this.prisma.application.count({
         where: {
@@ -106,7 +106,7 @@ export class JobsService {
     const usageMap = new Map(usage.map((u) => [u.jobId, u._count._all]));
     const summary = {
       open,
-      pendingApproval,
+      draft,
       headcount: headcountAgg._sum.headcount ?? 0,
       hcUsed,
       inFlow,
@@ -147,7 +147,7 @@ export class JobsService {
         status: 'OPEN',
         createdById: user.sub,
         stages: {
-          create: DEFAULT_PIPELINE_STAGES.map((name, index) => ({ name, order: index })),
+          create: DEFAULT_PIPELINE_STAGES.map((stage, index) => ({ name: stage.name, kind: stage.kind, order: index })),
         },
       },
       include: { stages: { orderBy: { order: 'asc' } } },
@@ -239,8 +239,7 @@ export class JobsService {
   }
 
   /**
-   * 全量更新职位的 Pipeline 阶段：
-   * 传入有 id 的做改名/排序，无 id 的新增；未出现的阶段删除。
+   * 全量更新职位的阶段：传入有 id 的做改名/排序，无 id 的新增为自定义阶段；未出现的自定义阶段删除。
    */
   async updateStages(jobId: string, dto: UpdateStagesDto, user: JwtUser) {
     // 写入与读取遵守同一部门范围；功能权限仍由控制器守卫校验。
@@ -259,6 +258,18 @@ export class JobsService {
     }
 
     const toDelete = existing.filter((s) => !incomingIds.has(s.id));
+    // 系统阶段（筛选 / 面试 / 录用 / 入职）驱动自动流转：可以改名、不能删除，先后顺序也不能打乱
+    const systemDeleted = toDelete.filter((s) => s.kind !== StageKind.CUSTOM);
+    if (systemDeleted.length > 0) {
+      throw new BadRequestException(`「${systemDeleted.map((s) => s.name).join('、')}」是系统阶段，可以改名但不能删除`);
+    }
+    const kindById = new Map(existing.map((s) => [s.id, s.kind]));
+    const systemOrder = dto.stages
+      .map((item) => (item.id ? kindById.get(item.id) : undefined))
+      .filter((k): k is StageKind => Boolean(k) && k !== StageKind.CUSTOM);
+    if (systemOrder.some((k, i) => SYSTEM_STAGE_KINDS.indexOf(k as (typeof SYSTEM_STAGE_KINDS)[number]) !== i)) {
+      throw new BadRequestException('系统阶段的先后顺序固定为：筛选 → 面试 → 录用 → 入职，自定义阶段可以插在它们之间');
+    }
     if (toDelete.length > 0) {
       const blocked = await this.prisma.application.count({
         where: { stageId: { in: toDelete.map((s) => s.id) } },

@@ -18,7 +18,7 @@ const httpError = (status: number, data: unknown = {}, headers: Record<string, s
     config: { headers: new AxiosHeaders() },
   });
 
-const USER = { id: 'u1', email: 'hr@arthr.local', name: '王招聘', roles: [], permissions: [], department: null };
+const USER = { id: 'u1', email: 'hr@hireflow.local', name: '王招聘', roles: [], permissions: [], department: null };
 
 function renderLogin() {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
@@ -43,7 +43,7 @@ const emailInput = () => screen.getByPlaceholderText('you@company.com') as HTMLI
 const passwordInput = () => screen.getByPlaceholderText('请输入密码') as HTMLInputElement;
 const submit = () => screen.getByRole('button', { name: /登\s*录|秒后可重试/ });
 
-async function fillAndSubmit(email = 'hr@arthr.local', password = 'Wrong123') {
+async function fillAndSubmit(email = 'hr@hireflow.local', password = 'Wrong123') {
   fireEvent.change(emailInput(), { target: { value: email } });
   fireEvent.change(passwordInput(), { target: { value: password } });
   fireEvent.click(submit());
@@ -116,24 +116,24 @@ describe('记住邮箱', () => {
   it('勾选（默认）登录成功后保存邮箱，下次打开自动填入；从不保存密码', async () => {
     vi.spyOn(authApi, 'login').mockResolvedValue({ accessToken: 't', user: USER } as never);
     const router = renderLogin();
-    await fillAndSubmit('manager@arthr.local', 'Secret123');
+    await fillAndSubmit('manager@hireflow.local', 'Secret123');
     await waitFor(() => expect(router.state.location.pathname).toBe('/'));
-    expect(localStorage.getItem(REMEMBER_EMAIL_KEY)).toBe('manager@arthr.local');
+    expect(localStorage.getItem(REMEMBER_EMAIL_KEY)).toBe('manager@hireflow.local');
     expect(JSON.stringify(localStorage)).not.toContain('Secret123');
 
     cleanup();
     useAuthStore.setState({ token: null, user: null });
     renderLogin();
-    expect(emailInput().value).toBe('manager@arthr.local');
+    expect(emailInput().value).toBe('manager@hireflow.local');
   });
 
   it('取消勾选后登录：清除已记住的邮箱', async () => {
-    localStorage.setItem(REMEMBER_EMAIL_KEY, 'old@arthr.local');
+    localStorage.setItem(REMEMBER_EMAIL_KEY, 'old@hireflow.local');
     vi.spyOn(authApi, 'login').mockResolvedValue({ accessToken: 't', user: USER } as never);
     renderLogin();
-    expect(emailInput().value).toBe('old@arthr.local');
+    expect(emailInput().value).toBe('old@hireflow.local');
     fireEvent.click(screen.getByRole('checkbox', { name: '记住邮箱' }));
-    await fillAndSubmit('hr@arthr.local', 'Secret123');
+    await fillAndSubmit('hr@hireflow.local', 'Secret123');
     await waitFor(() => expect(localStorage.getItem(REMEMBER_EMAIL_KEY)).toBeNull());
   });
 });
@@ -152,11 +152,11 @@ describe('演示账号入口', () => {
     renderLogin();
     const toggle = await screen.findByRole('button', { name: /演示账号/ });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(screen.queryByText('interviewer@arthr.local')).toBeNull();
+    expect(screen.queryByText('interviewer@hireflow.local')).toBeNull();
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    fireEvent.click(screen.getByText('interviewer@arthr.local'));
-    await waitFor(() => expect(emailInput().value).toBe('interviewer@arthr.local'));
+    fireEvent.click(screen.getByText('interviewer@hireflow.local'));
+    await waitFor(() => expect(emailInput().value).toBe('interviewer@hireflow.local'));
   });
 
   it('VITE_DEMO_MODE=false 时不渲染演示账号入口', async () => {
@@ -177,7 +177,7 @@ describe('演示账号入口', () => {
       await act(async () => {
         await new Promise((r) => setTimeout(r, 50));
       });
-      expect(screen.getByText('ART 智能招聘')).toBeTruthy();
+      expect(screen.getByText('HireFlow 招聘')).toBeTruthy();
       expect(screen.queryByRole('button', { name: /演示账号/ })).toBeNull();
       expect(emailInput().value).toBe('');
     } finally {

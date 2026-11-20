@@ -155,7 +155,7 @@ describe('面试管理默认「待进行」', () => {
     useAuthStore.setState({
       user: {
         id: 'hr',
-        email: 'hr@arthr.local',
+        email: 'hr@hireflow.local',
         name: '何欣',
         roles: ['HR'],
         department: null,

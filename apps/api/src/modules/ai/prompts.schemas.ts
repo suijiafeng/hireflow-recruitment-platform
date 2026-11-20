@@ -133,16 +133,6 @@ export const COMPARE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export const RETENTION_SCHEMA = {
-  type: 'object',
-  properties: {
-    probability: { type: 'number', description: '0-1 之间的试用期留存概率估计' },
-    factors: { type: 'array', items: { type: 'string' }, description: '2-4 条影响因素说明' },
-  },
-  required: ['probability', 'factors'],
-  additionalProperties: false,
-} as const;
-
 export const INSIGHT_SCHEMA = {
   type: 'object',
   properties: {

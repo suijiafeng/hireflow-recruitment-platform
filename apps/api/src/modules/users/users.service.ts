@@ -40,7 +40,6 @@ export class UsersService {
    * 业务约束：
    * - 邮箱即登录账号，必须全局唯一；
    * - 至少一个角色——没有角色的账号能登录却什么都看不到，是个死账号；
-   * - 门户角色（CANDIDATE / NEW_HIRE）属于免登录 H5 身份，不可分配给内部成员；
    * - 部门可选，但给了就必须存在。
    *
    * 本项目未接邮件通道，因此生成初始密码并「仅此一次」随响应返回，由管理员转交。
@@ -53,11 +52,6 @@ export class UsersService {
     if (exists) throw new BadRequestException(`邮箱「${email}」已被占用（${exists.name}）`);
 
     const unique = [...new Set(dto.roleCodes)];
-    const portal: string[] = [RoleCode.CANDIDATE, RoleCode.NEW_HIRE];
-    const portalPicked = unique.filter((c) => portal.includes(c));
-    if (portalPicked.length) {
-      throw new BadRequestException(`「${portalPicked.join('、')}」是候选人/新员工门户角色，不能分配给内部成员`);
-    }
     const roles = await this.prisma.role.findMany({ where: { code: { in: unique } } });
     if (roles.length !== unique.length) {
       const known = new Set(roles.map((r) => r.code));

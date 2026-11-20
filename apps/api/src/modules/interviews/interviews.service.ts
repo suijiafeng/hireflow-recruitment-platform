@@ -5,23 +5,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ACTIVITY_ACTIONS, AI_DRAFT_MARKER, EVALUATION_CONCLUSION_LABEL, PERMISSIONS, RoleCode } from '@hireflow/shared';
+import { ACTIVITY_ACTIONS, AI_DRAFT_MARKER, EVALUATION_CONCLUSION_LABEL, PERMISSIONS, roundLabel, StageKind } from '@hireflow/shared';
 import { departmentScopeOf, inDepartmentScope, isAssignedScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
-import {
-  assertPortalLive,
-  candidateActor,
-  CN_TZ_OFFSET_MS,
-  formatCnDateTime,
-  isPortalLive,
-  newPortalToken,
-  PORTAL_TTL,
-  portalExpiry,
-  portalLinkInvalid,
-} from '../../common/portal';
+import { candidateActor, CN_TZ_OFFSET_MS, ensurePortalLink, formatCnDateTime, PORTAL_TTL, portalExpiry } from '../../common/portal';
 import { Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { AiService } from '../ai/ai.service';
+import { ApplicationsService } from '../applications/applications.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateInterviewDto } from './dto/create-interview.dto';
@@ -40,6 +31,7 @@ export class InterviewsService {
     private readonly activityLog: ActivityLogService,
     private readonly ai: AiService,
     private readonly notifications: NotificationsService,
+    private readonly applications: ApplicationsService,
   ) {}
 
   private async schedulingTransaction<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
@@ -192,6 +184,10 @@ export class InterviewsService {
         include: INTERVIEW_INCLUDE,
       });
       if (window) await this.occupySlots(tx, interview.id, dto.interviewerIds, window.start, window.end, false);
+      // 约面试即推进：卡片自动移到「面试」列（已在更后面的列时不回拖）
+      await this.applications.moveToStageKind(dto.applicationId, StageKind.INTERVIEW, user, tx);
+      // 时间待定：候选人页打开选时（同一个链接，顺延有效期）
+      if (!window) await ensurePortalLink(tx, dto.applicationId, portalExpiry(PORTAL_TTL.INTERVIEW_MS));
       return { application, interview };
     });
 
@@ -210,7 +206,7 @@ export class InterviewsService {
     // 通知矩阵：面试确认 → 面试官（日历/IM 通道后续接入）
     await this.notifications.push(
       dto.interviewerIds,
-      `新面试指派：${application.candidate.name}（第 ${dto.round} 轮）`,
+      `新面试指派：${application.candidate.name}（${roundLabel(dto.round)}）`,
       `${application.job.title}${dto.scheduledAt ? ` · ${formatCnDateTime(dto.scheduledAt)}` : ' · 时间待定'}`,
       `/interviews?candidate=${application.candidateId}`,
     );
@@ -252,7 +248,7 @@ export class InterviewsService {
     );
     await this.notifications.push(
       interviewerIds,
-      `面试时间已确定：${interview.application.candidate.name}（第 ${interview.round} 轮）`,
+      `面试时间已确定：${interview.application.candidate.name}（${roundLabel(interview.round)}）`,
       `${interview.application.job.title} · ${formatCnDateTime(start)}`,
       `/interviews?candidate=${interview.application.candidateId}`,
     );
@@ -283,7 +279,7 @@ export class InterviewsService {
     );
     await this.notifications.push(
       interview.interviewers.map((i) => i.userId),
-      `面试已取消：${interview.application.candidate.name}（第 ${interview.round} 轮）`,
+      `面试已取消：${interview.application.candidate.name}（${roundLabel(interview.round)}）`,
       `${interview.scheduledAt ? `原定 ${formatCnDateTime(interview.scheduledAt)} · ` : ''}由 ${user.name} 取消`,
       `/interviews?candidate=${interview.application.candidateId}`,
     );
@@ -490,7 +486,7 @@ export class InterviewsService {
     ]);
     await this.notifications.push(
       [...recipients].filter((id) => id !== user.sub),
-      `面评${revising ? '已修订' : '已提交'}：${interview.application.candidate.name}（第 ${interview.round} 轮 · ${conclusionLabel}）`,
+      `面评${revising ? '已修订' : '已提交'}：${interview.application.candidate.name}（${roundLabel(interview.round)} · ${conclusionLabel}）`,
       `${interview.application.job.title} · 面试官 ${user.name}`,
       `/candidates?candidate=${interview.application.candidate.id}`,
     );
@@ -568,8 +564,8 @@ export class InterviewsService {
   }
 
   /**
-   * 生成候选人自助选时链接（未定时间的面试）。
-   * 有效期内重发复用同一令牌并顺延 7 天；已过期或 rotate=true 换新令牌，旧链接立即失效。
+   * 候选人选时链接 = 该应聘的候选人页链接（未定时间的面试；本场面试官也可以发）。
+   * rotate=true 换新令牌，旧链接立即失效。
    */
   async selfScheduleLink(interviewId: string, user: JwtUser, rotate = false) {
     return this.schedulingTransaction(async (tx) => {
@@ -580,66 +576,53 @@ export class InterviewsService {
       this.assertSchedulable(interview);
       this.assertActive(interview.application);
       if (interview.scheduledAt) throw new BadRequestException('该面试已确定时间，如需改期请联系 HR');
-      const reuse = interview.portalToken && !rotate && isPortalLive(interview.portalExpiresAt);
-      const token = reuse ? interview.portalToken! : newPortalToken();
-      await tx.interview.update({
-        where: { id: interviewId },
-        data: { portalToken: token, portalExpiresAt: portalExpiry(PORTAL_TTL.INTERVIEW_MS) },
-      });
-      return { token };
+      const link = await ensurePortalLink(tx, interview.applicationId, portalExpiry(PORTAL_TTL.INTERVIEW_MS), rotate);
+      return { token: link.token, expiresAt: link.expiresAt };
     });
   }
 
-  /** 候选人视角：可选时段 = 全部被指派面试官都空闲的时间窗（多面试官取重叠覆盖） */
-  async portalView(token: string) {
-    const interview = await this.prisma.interview.findUnique({
-      where: { portalToken: token },
-      include: {
-        interviewers: { orderBy: { userId: 'asc' }, include: { user: { select: { id: true, name: true } } } },
-        application: {
-          select: {
-            status: true,
-            candidate: { select: { name: true } },
-            job: { select: { title: true } },
-          },
-        },
-      },
+  /** 候选人页上的面试部分：未定时间的场次附带可选时段（全部被指派面试官都空闲的时间窗） */
+  async portalSection(applicationId: string, applicationActive: boolean) {
+    const interviews = await this.prisma.interview.findMany({
+      where: { applicationId, status: { not: 'CANCELED' } },
+      orderBy: { round: 'asc' },
+      include: { interviewers: { orderBy: { userId: 'asc' }, include: { user: { select: { id: true, name: true } } } } },
     });
-    if (!interview) throw portalLinkInvalid();
-    assertPortalLive(interview.portalExpiresAt);
-
-    const base = {
-      company: 'ART 科技有限公司',
-      candidateName: interview.application.candidate.name,
-      jobTitle: interview.application.job.title,
-      round: interview.round,
-      durationMins: interview.durationMins ?? 60,
-      scheduledAt: interview.scheduledAt,
-      status: interview.status,
-      closed: interview.status !== 'SCHEDULED' || interview.application.status !== 'ACTIVE',
-    };
-    // 取消过的场次仍带着原定时间：先按状态判断，否则候选人会看到「已确认」并按时到场
-    if (base.closed || interview.scheduledAt) return { ...base, slots: [] };
-
-    const interviewerIds = interview.interviewers.map((i) => i.user.id);
     const now = new Date();
-    const slots = await this.prisma.interviewerSlot.findMany({
-      where: { userId: { in: interviewerIds }, bookedBy: null, startAt: { gte: now } },
-      orderBy: { startAt: 'asc' },
-    });
-    return { ...base, slots: this.commonSlots(slots, interviewerIds, base.durationMins) };
+    return Promise.all(
+      interviews.map(async (interview) => {
+        const durationMins = interview.durationMins ?? 60;
+        const base = {
+          id: interview.id,
+          round: interview.round,
+          roundLabel: roundLabel(interview.round),
+          durationMins,
+          scheduledAt: interview.scheduledAt,
+          meetingUrl: interview.meetingUrl,
+          location: interview.location,
+          status: interview.status,
+          interviewers: interview.interviewers.map((i) => i.user.name),
+        };
+        if (!applicationActive || interview.status !== 'SCHEDULED' || interview.scheduledAt) return { ...base, slots: [] };
+        const interviewerIds = interview.interviewers.map((i) => i.user.id);
+        const slots = await this.prisma.interviewerSlot.findMany({
+          where: { userId: { in: interviewerIds }, bookedBy: null, startAt: { gte: now } },
+          orderBy: { startAt: 'asc' },
+        });
+        return { ...base, slots: this.commonSlots(slots, interviewerIds, durationMins) };
+      }),
+    );
   }
 
   /**
    * 候选人确认时段：写入条件二次校验（确认瞬间二次校验，冲突给替代时段），
    * 并发抢占返回 409，前端刷新剩余时段。
    */
-  async portalPick(token: string, slotId: string, selectedStartAt?: string) {
+  async portalPick(applicationId: string, interviewId: string, slotId: string, selectedStartAt?: string) {
     const { interview, start } = await this.schedulingTransaction(async (tx) => {
-      const seed = await tx.interview.findUnique({ where: { portalToken: token }, select: { id: true, portalExpiresAt: true } });
-      if (!seed) throw portalLinkInvalid();
-      assertPortalLive(seed.portalExpiresAt);
-      const interview = await this.lockInterview(tx, seed.id);
+      const interview = await this.lockInterview(tx, interviewId);
+      // 面试必须属于这条应聘：防止拿自己的链接去选别人的面试
+      if (interview.applicationId !== applicationId) throw new NotFoundException('面试不存在');
       this.assertSchedulable(interview);
       this.assertActive(interview.application);
       if (interview.scheduledAt) throw new ConflictException('该面试时间已确定，请刷新查看');
@@ -650,23 +633,17 @@ export class InterviewsService {
         where: { userId: { in: interviewerIds }, bookedBy: null, startAt: { gt: new Date() } },
         orderBy: { startAt: 'asc' },
       });
-      // 一份主档可以形成多个交集；新客户端带交集起点，旧 slotId 请求使用第一个仍可用交集。
-      const chosen = this.commonSlots(slots, interviewerIds, durationMins).find((s) =>
-        s.id === slotId && (!selectedStartAt || s.startAt.getTime() === new Date(selectedStartAt).getTime()),
+      // 一份主档可以形成多个交集；客户端带交集起点，旧 slotId 请求使用第一个仍可用交集
+      const chosen = this.commonSlots(slots, interviewerIds, durationMins).find(
+        (s) => s.id === slotId && (!selectedStartAt || s.startAt.getTime() === new Date(selectedStartAt).getTime()),
       );
       if (!chosen) throw new ConflictException('该时段已不可用或不足面试时长，请重新选择');
       const { start, end } = this.window(chosen.startAt, durationMins);
       await this.assertNoConflict(tx, interviewerIds, start, end, interview.id);
       await this.occupySlots(tx, interview.id, interviewerIds, start, end, true);
-      // 一次性：选定后不可再选；链接保留到面试开始后 1 天供候选人回看
-      await tx.interview.update({
-        where: { id: interview.id },
-        data: {
-          scheduledAt: start,
-          status: 'SCHEDULED',
-          portalExpiresAt: portalExpiry(PORTAL_TTL.INTERVIEW_AFTER_START_MS, start),
-        },
-      });
+      await tx.interview.update({ where: { id: interview.id }, data: { scheduledAt: start, status: 'SCHEDULED' } });
+      // 链接至少保留到面试开始后 1 天，候选人可以回看时间地点
+      await ensurePortalLink(tx, applicationId, portalExpiry(PORTAL_TTL.INTERVIEW_AFTER_START_MS, start));
       return { interview, start };
     });
     const actor = candidateActor(interview.application.candidate.name);
@@ -675,20 +652,18 @@ export class InterviewsService {
       round: interview.round,
       scheduledAt: start.toISOString(),
     });
-    // 通知矩阵：面试确认 → 面试官 IM+日历（此处站内信），HR 站内
     await this.notifications.push(
       interview.interviewers.map((i) => i.userId),
       `候选人已确认面试时间：${interview.application.candidate.name}`,
-      `${interview.application.job.title} · 第 ${interview.round} 轮 · ${formatCnDateTime(start)}`,
+      `${interview.application.job.title} · ${roundLabel(interview.round)} · ${formatCnDateTime(start)}`,
       `/interviews?candidate=${interview.application.candidateId}`,
     );
     await this.notifications.pushByPermission(
       PERMISSIONS.INTERVIEW_SCHEDULE,
       interview.application.job.departmentId,
       `面试时间已敲定：${interview.application.candidate.name}`,
-      `${interview.application.job.title} · 第 ${interview.round} 轮`,
+      `${interview.application.job.title} · ${roundLabel(interview.round)}`,
       `/interviews?candidate=${interview.application.candidateId}`,
     );
-    return this.portalView(token);
   }
 }

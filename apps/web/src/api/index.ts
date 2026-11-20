@@ -14,7 +14,6 @@ import type {
   BatchResult,
   BoardCard,
   BoardData,
-  CompareData,
   Candidate,
   CandidateDetail,
   CompanyDoc,
@@ -23,25 +22,21 @@ import type {
   EvaluationDraft,
   FunnelData,
   ActivityItem,
-  HelpdeskAnswer,
   InsightsData,
   Interview,
   InterviewerSlot,
-  InterviewPortalView,
   JdDraft,
   Job,
   JobListSummary,
   JobStage,
   JobStageInput,
   Offer,
-  OfferPortalView,
   Onboarding,
-  OnboardingPortalView,
   Paginated,
+  PortalView,
+  HelpdeskAnswer,
   PermissionDef,
-  PrescreenView,
   Resume,
-  RetentionHint,
   Role,
   TalentPoolScanResult,
   TodoSummary,
@@ -143,11 +138,12 @@ export const applicationsApi = {
   create: (data: { candidateId: string; jobId: string }) =>
     http.post<ApplicationCreateResult>('/applications', data).then((r) => r.data),
   score: (id: string) => http.post<ScoreResult>(`/applications/${id}/score`, undefined, aiRequest).then((r) => r.data),
-  compare: (ids: string[]) =>
-    http.post<CompareData>('/applications/compare', { ids }, aiRequest).then((r) => r.data),
-  /** rotate=true 重新生成链接，旧链接立即失效；链接 7 天有效，有效期内重发会顺延 */
-  prescreenLink: (id: string, rotate = false) =>
-    http.post<{ token: string }>(`/applications/${id}/prescreen-link`, { rotate }).then((r) => r.data),
+  /**
+   * 候选人页链接：选面试时间、答复 Offer、填写入职信息共用一个链接。
+   * rotate=true 重新生成，旧链接立即失效；有效期内再取会顺延。
+   */
+  portalLink: (id: string, rotate = false) =>
+    http.post<{ token: string; expiresAt: string }>(`/applications/${id}/portal-link`, { rotate }).then((r) => r.data),
 };
 
 export const resumesApi = {
@@ -174,55 +170,25 @@ export const offersApi = {
     grade?: string;
     note?: string;
   }) => http.post<Offer>('/offers', data).then((r) => r.data),
-  approve: (id: string, note?: string) =>
-    http.post<Offer>(`/offers/${id}/approve`, { note }).then((r) => r.data),
-  reject: (id: string, note?: string) =>
-    http.post<Offer>(`/offers/${id}/reject`, { note }).then((r) => r.data),
-  resubmit: (
-    id: string,
-    data: { salaryBase: number; bonusMonths?: number; startDate: string; grade?: string; note?: string },
-  ) => http.post<Offer>(`/offers/${id}/resubmit`, data).then((r) => r.data),
   send: (id: string) => http.post<Offer>(`/offers/${id}/send`).then((r) => r.data),
   extend: (id: string) => http.post<Offer>(`/offers/${id}/extend`).then((r) => r.data),
-  /** rotate=true 重新生成链接，旧链接立即失效 */
-  portalLink: (id: string, rotate = false) =>
-    http.post<{ token: string }>(`/offers/${id}/portal-link`, { rotate }).then((r) => r.data),
   respond: (id: string, decision: 'ACCEPTED' | 'DECLINED', reason?: string) =>
     http.post<Offer>(`/offers/${id}/respond`, { decision, reason }).then((r) => r.data),
-  retention: (id: string) => http.post<RetentionHint>(`/offers/${id}/retention`, undefined, aiRequest).then((r) => r.data),
 };
 
-/** 候选人/新员工免登录门户（链接即凭证，不带 JWT） */
+/** 候选人页（免登录，链接即凭证，不带 JWT） */
 export const portalApi = {
-  offerView: (token: string) =>
-    http.get<OfferPortalView>(`/portal/offers/${token}`).then((r) => r.data),
-  offerRespond: (token: string, decision: 'ACCEPTED' | 'DECLINED', reason?: string) =>
-    http.post<OfferPortalView>(`/portal/offers/${token}/respond`, { decision, reason }).then((r) => r.data),
-  onboardingView: (token: string) =>
-    http.get<OnboardingPortalView>(`/portal/onboardings/${token}`).then((r) => r.data),
-  onboardingAddDocument: (token: string, data: { type: string; rawText: string }) =>
-    http.post<OnboardingPortalView>(`/portal/onboardings/${token}/documents`, data).then((r) => r.data),
-  onboardingAddDocumentFile: (token: string, data: { type: string; rawText?: string; file?: File }) => {
-    const form = new FormData();
-    form.append('type', data.type);
-    if (data.rawText) form.append('rawText', data.rawText);
-    if (data.file) form.append('file', data.file);
-    return http
-      .post<OnboardingPortalView>(`/portal/onboardings/${token}/documents/file`, form)
-      .then((r) => r.data);
-  },
-  onboardingSignContract: (token: string) =>
-    http.post<OnboardingPortalView>(`/portal/onboardings/${token}/contract/sign`).then((r) => r.data),
-  interviewView: (token: string) =>
-    http.get<InterviewPortalView>(`/portal/interviews/${token}`).then((r) => r.data),
-  interviewPick: (token: string, slotId: string, startAt?: string) =>
-    http.post<InterviewPortalView>(`/portal/interviews/${token}/pick`, { slotId, startAt }).then((r) => r.data),
-  prescreenView: (token: string) =>
-    http.get<PrescreenView>(`/portal/prescreen/${token}`).then((r) => r.data),
-  prescreenSubmit: (
-    token: string,
-    data: { expectedSalary: number; availableDate: string; travelOk: boolean; note?: string },
-  ) => http.post<PrescreenView>(`/portal/prescreen/${token}`, data).then((r) => r.data),
+  view: (token: string) => http.get<PortalView>(`/portal/${token}`).then((r) => r.data),
+  pick: (token: string, interviewId: string, slotId: string, startAt?: string) =>
+    http.post<PortalView>(`/portal/${token}/interviews/${interviewId}/pick`, { slotId, startAt }).then((r) => r.data),
+  respond: (token: string, decision: 'ACCEPTED' | 'DECLINED', reason?: string) =>
+    http.post<PortalView>(`/portal/${token}/offer/respond`, { decision, reason }).then((r) => r.data),
+  saveInfo: (token: string, info: Record<string, string>) =>
+    http.put<PortalView>(`/portal/${token}/onboarding/info`, info).then((r) => r.data),
+  sign: (token: string, signerName: string) =>
+    http.post<PortalView>(`/portal/${token}/onboarding/contract/sign`, { signerName }).then((r) => r.data),
+  ask: (token: string, question: string) =>
+    http.post<HelpdeskAnswer>(`/portal/${token}/onboarding/ask`, { question }, aiRequest).then((r) => r.data),
 };
 
 export const notificationsApi = {
@@ -243,42 +209,14 @@ export const notificationsApi = {
 export const onboardingApi = {
   list: () => http.get<Onboarding[]>('/onboardings').then((r) => r.data),
   get: (id: string) => http.get<Onboarding>(`/onboardings/${id}`).then((r) => r.data),
-  toggle: (id: string, key: string, done: boolean) =>
-    http.patch<Onboarding>(`/onboardings/${id}/checklist/${key}`, { done }).then((r) => r.data),
-  addDocument: (id: string, data: { type: string; rawText: string }) =>
-    http.post<Onboarding>(`/onboardings/${id}/documents`, data).then((r) => r.data),
-  addDocumentFile: (id: string, data: { type: string; rawText?: string; file?: File }) => {
-    const form = new FormData();
-    form.append('type', data.type);
-    if (data.rawText) form.append('rawText', data.rawText);
-    if (data.file) form.append('file', data.file);
-    return http.post<Onboarding>(`/onboardings/${id}/documents/file`, form).then((r) => r.data);
-  },
-  createContract: (id: string) =>
-    http.post<Onboarding>(`/onboardings/${id}/contract`).then((r) => r.data),
-  sendContract: (contractId: string) =>
-    http.post<Onboarding>(`/contracts/${contractId}/send`).then((r) => r.data),
-  signContract: (contractId: string) =>
-    http.post<Onboarding>(`/contracts/${contractId}/sign`).then((r) => r.data),
-  /** rotate=true 重新生成链接，旧链接立即失效 */
-  portalLink: (id: string, rotate = false) =>
-    http.post<{ token: string }>(`/onboardings/${id}/portal-link`, { rotate }).then((r) => r.data),
-};
-
-export const helpdeskApi = {
-  ask: (question: string) => http.post<HelpdeskAnswer>('/helpdesk/ask', { question }, aiRequest).then((r) => r.data),
-  docs: () =>
-    http
-      .get<Array<{ id: string; title: string; tags: string[] }>>('/helpdesk/docs')
-      .then((r) => r.data),
+  complete: (id: string, note?: string) =>
+    http.post<Onboarding>(`/onboardings/${id}/complete`, { note }).then((r) => r.data),
 };
 
 export const analyticsApi = {
   overview: () => http.get<AnalyticsOverview>('/analytics/overview').then((r) => r.data),
   todos: () => http.get<TodoSummary>('/analytics/todos').then((r) => r.data),
   funnel: (jobId: string) => http.get<FunnelData>(`/analytics/funnel/${jobId}`).then((r) => r.data),
-  insight: (jobId: string) =>
-    http.post<{ insight: string; aiMeta: { provider: string } }>(`/analytics/insight/${jobId}`, undefined, aiRequest).then((r) => r.data),
   trend: () => http.get<TrendData>('/analytics/trend').then((r) => r.data),
   /** range/deptId 按「应聘创建时间」划同期群；五组指标共用同一口径，响应 scope 回显实际生效范围 */
   insights: (params?: { range?: InsightsRange; deptId?: string }) =>

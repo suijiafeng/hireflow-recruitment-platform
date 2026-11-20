@@ -1,17 +1,16 @@
 import { DataScope } from '@hireflow/shared';
 import type { JwtUser } from './decorators/current-user.decorator';
 
-/** 数据范围宽窄序：全局 > 本部门 > 仅被指派 > 仅本人 */
+/** 数据范围宽窄序：全局 > 本部门 > 仅被指派 */
 const SCOPE_WIDTH: Record<string, number> = {
-  [DataScope.ALL]: 4,
-  [DataScope.DEPARTMENT]: 3,
-  [DataScope.ASSIGNED]: 2,
-  [DataScope.OWN]: 1,
+  [DataScope.ALL]: 3,
+  [DataScope.DEPARTMENT]: 2,
+  [DataScope.ASSIGNED]: 1,
 };
 
 /** 多角色取最宽范围（如 管理员+面试官 → 全局） */
 export function widestScope(scopes: string[]): DataScope {
-  let widest: DataScope = DataScope.OWN;
+  let widest: DataScope = DataScope.ASSIGNED;
   for (const s of scopes) {
     if ((SCOPE_WIDTH[s] ?? 0) > SCOPE_WIDTH[widest]) widest = s as DataScope;
   }

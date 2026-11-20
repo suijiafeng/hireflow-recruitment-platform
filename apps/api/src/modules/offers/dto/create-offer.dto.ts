@@ -2,12 +2,12 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsDateString, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { OFFER_DECLINE_REASONS } from '@hireflow/shared';
 
-/** Offer 薪资包字段（发起与修改重提共用） */
+/** Offer 薪资包字段 */
 export class OfferPackageDto {
   @ApiProperty({ description: '月薪（base，元）', example: 30000 })
-  @IsInt()
-  @Min(1000)
-  @Max(1_000_000)
+  @IsInt({ message: '月薪必须是整数' })
+  @Min(1000, { message: '月薪不能低于 1000 元' })
+  @Max(1_000_000, { message: '月薪不能超过 100 万元' })
   salaryBase: number;
 
   @ApiPropertyOptional({ description: '年终奖月数', example: 3 })
@@ -27,7 +27,7 @@ export class OfferPackageDto {
   @MaxLength(20)
   grade?: string;
 
-  @ApiPropertyOptional({ description: '备注（审批人可见）' })
+  @ApiPropertyOptional({ description: '备注（内部可见）' })
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -38,17 +38,6 @@ export class CreateOfferDto extends OfferPackageDto {
   @ApiProperty({ description: '应聘记录 id' })
   @IsString()
   applicationId: string;
-}
-
-/** 驳回后修改重提（驳回带意见退回 HR 修改重提） */
-export class ResubmitOfferDto extends OfferPackageDto {}
-
-export class ApprovalDto {
-  @ApiPropertyOptional({ description: '审批意见（驳回时将随 Offer 退回 HR）' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  note?: string;
 }
 
 export class RespondDto {

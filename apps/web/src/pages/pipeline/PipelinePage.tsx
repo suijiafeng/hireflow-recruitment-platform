@@ -21,7 +21,7 @@ import {
   RobotOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import { PERMISSIONS, REJECT_REASONS, STAGE_STAY_SLA } from '@hireflow/shared';
+import { PERMISSIONS, REJECT_REASONS, STAGE_STAY_SLA, StageKind } from '@hireflow/shared';
 import {
   Alert,
   Badge,
@@ -31,7 +31,6 @@ import {
   Dropdown,
   Form,
   Input,
-  Modal,
   Select,
   Space,
   Spin,
@@ -46,14 +45,14 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { applicationsApi, boardApi, candidatesApi, jobsApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
-import type { BatchResult, BoardCard, BoardData, CompareData } from '../../api/types';
+import type { BatchResult, BoardCard, BoardData, InterviewTag } from '../../api/types';
 import { CandidateDetailDrawer } from '../../components/CandidateDetailDrawer';
 import { useDrawerParam } from '../../hooks/useUrlState';
 import { useAuthStore } from '../../stores/auth';
 import { useCopilotUi } from '../../copilot/store';
 import { pickDefaultJobId } from '../../utils/jobs';
 import { FormModal } from '../../components/FormModal';
-import { AiSourceBadge, RuleScoreMark } from '../../components/ui';
+import { RuleScoreMark } from '../../components/ui';
 import { pressable } from '../../utils/pressable';
 import { useAppDialogs } from '../../hooks/useAppDialogs';
 
@@ -122,19 +121,7 @@ function CardView({ card, overlay = false }: { card: BoardCard; overlay?: boolea
         )}
       </div>
       <div className="kanban-card-meta">{meta}</div>
-      {card.prescreen && (
-        <Tooltip
-          title={
-            card.prescreen.flags.length
-              ? card.prescreen.flags.join('；')
-              : `期望 ¥${card.prescreen.expectedSalary.toLocaleString()} · ${card.prescreen.availableDate} 可到岗`
-          }
-        >
-          <span className={card.prescreen.flags.length ? 'hf-tag hf-tag--warn' : 'hf-tag hf-tag--ok'}>
-            {card.prescreen.flags.length ? `预筛 ${card.prescreen.flags.length} 项不符` : '预筛符合'}
-          </span>
-        </Tooltip>
-      )}
+      {card.status === 'ACTIVE' && card.interview && <RoundTag tag={card.interview} />}
       {/* 看板只会出现 ACTIVE 与 HIRED 两种卡；终态卡片不参与流转，也不再算停留时长 */}
       {card.status !== 'ACTIVE' && <div className="kanban-card-meta">已入职 · 流程已完成</div>}
       {card.status === 'ACTIVE' && days > STAGE_STAY_SLA.warnDays && (
@@ -147,18 +134,41 @@ function CardView({ card, overlay = false }: { card: BoardCard; overlay?: boolea
   );
 }
 
-/** 由业务事件自动流转、不能直接拖入的阶段（后端同样拒绝）：拖动时置灰并说明原因 */
-const AUTO_ONLY_STAGES: Record<string, string> = {
-  待入职: '候选人接受 Offer 后自动进入',
-  已入职: '入职流程闭环后自动进入',
+/** 面试轮次标签：轮次不再是看板列，而是卡片上的一枚标签（一面 · 待评价 1/2） */
+const ROUND_STATE: Record<InterviewTag['state'], { text: string; cls: string }> = {
+  unscheduled: { text: '待定时间', cls: 'hf-tag hf-tag--warn' },
+  scheduled: { text: '已约', cls: 'hf-tag hf-tag--on' },
+  awaiting_evaluation: { text: '待评价', cls: 'hf-tag hf-tag--warn' },
+  evaluated: { text: '已评价', cls: 'hf-tag hf-tag--ok' },
+};
+const ROUND_NAMES = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
+export const roundName = (round: number) => `${ROUND_NAMES[round - 1] ?? round}面`;
+
+function RoundTag({ tag }: { tag: InterviewTag }) {
+  const state = ROUND_STATE[tag.state];
+  const progress = tag.state === 'awaiting_evaluation' && tag.total > 1 ? ` ${tag.submitted}/${tag.total}` : '';
+  const time = tag.scheduledAt && tag.state === 'scheduled' ? ` ${dayjs(tag.scheduledAt).format('MM-DD HH:mm')}` : '';
+  return (
+    <span className={`${state.cls} kanban-round`}>
+      {roundName(tag.round)} · {state.text}
+      {progress}
+      {time}
+    </span>
+  );
+}
+
+/** 由业务事件自动流转、不能直接拖入的阶段（后端同样按阶段类型拒绝）：拖动时置灰并说明原因 */
+const AUTO_ONLY_KINDS: Partial<Record<StageKind, string>> = {
+  [StageKind.ONBOARDING]: '候选人接受 Offer 后自动进入',
 };
 
-type StageRef = { id: string; name: string; order: number };
+type StageRef = { id: string; name: string; kind?: StageKind; order: number };
 
 /** 卡片从 from 移到 to 是否被禁止；返回原因或 null（回退不受限，走填写原因流程） */
 function blockedMove(from: StageRef | undefined, to: StageRef): string | null {
   if (!from || to.id === from.id) return null;
-  if (to.order > from.order && AUTO_ONLY_STAGES[to.name]) return AUTO_ONLY_STAGES[to.name];
+  const auto = to.kind ? AUTO_ONLY_KINDS[to.kind] : undefined;
+  if (to.order > from.order && auto) return auto;
   return null;
 }
 
@@ -358,118 +368,6 @@ function BoardColumnView({
   );
 }
 
-/** 候选人对比（V2 页面清单）：2-4 人并排 + AI 综合意见；AI 是辅助，终审在人 */
-function CompareModal({ data, loading, onClose }: { data: CompareData | null; loading: boolean; onClose: () => void }) {
-  const CONCLUSION_TEXT: Record<string, string> = {
-    STRONG_YES: '强烈推荐',
-    YES: '推荐',
-    NO: '不推荐',
-    STRONG_NO: '强烈不推荐',
-  };
-  return (
-    <Modal
-      className="hf-modal"
-      title={data ? `候选人对比 · ${data.jobTitle}` : 'AI 正在对比…'}
-      open={loading || Boolean(data)}
-      onCancel={onClose}
-      footer={null}
-      width={Math.min(320 * (data?.candidates.length ?? 2) + 80, 1200)}
-      classNames={{ body: 'modal-body-scroll' }}
-      destroyOnHidden
-    >
-      {loading || !data ? (
-        <div className="loading-center loading-center--lg">
-          <Spin description="AI 正在汇总匹配分与面评数据…" />
-        </div>
-      ) : (
-        <>
-          <div className="compare-cols">
-            {data.candidates.map((c) => {
-              const rank = data.ai.ranking.find((r) => r.name === c.name)?.rank;
-              return (
-                <Card
-                  key={c.applicationId}
-                  size="small"
-                  className={rank === 1 ? 'compare-card compare-card--top' : 'compare-card'}
-                  title={
-                    <Space>
-                      {c.name}
-                      {rank === 1 && <Tag color="processing">AI 首推</Tag>}
-                    </Space>
-                  }
-                >
-                  <p className="compare-line">
-                    匹配分：
-                    {c.matchScore != null ? (
-                      <Tag color={c.matchScore >= 85 ? 'success' : c.matchScore >= 70 ? 'processing' : 'default'}>
-                        {c.matchScore}
-                      </Tag>
-                    ) : (
-                      '未评分'
-                    )}
-                  </p>
-                  <div className="u-mb-4">
-                    {c.tags.slice(0, 4).map((t) => (
-                      <Tag key={t} className="tag-meta">
-                        {t}
-                      </Tag>
-                    ))}
-                  </div>
-                  {c.highlights && (
-                    <Typography.Paragraph className="u-meta u-mb-4" ellipsis={{ rows: 3 }}>
-                      {c.highlights}
-                    </Typography.Paragraph>
-                  )}
-                  <div className="u-meta">
-                    面评：
-                    {c.evaluations.length === 0 ? (
-                      <span className="u-muted">暂无</span>
-                    ) : (
-                      c.evaluations.map((e, i) => (
-                        <Tag key={i} color={e.conclusion?.includes('YES') ? 'success' : 'warning'} className="tag-meta">
-                          {CONCLUSION_TEXT[e.conclusion ?? ''] ?? '无结论'}
-                          {e.avgScore != null ? ` ${e.avgScore}分` : ''}
-                        </Tag>
-                      ))
-                    )}
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-          <Alert
-            type="info"
-            showIcon
-            title={
-              <span className="u-flex-gap-8 u-flex-center-v">
-                AI 综合意见 <AiSourceBadge meta={data.aiMeta} />
-                <span className="hf-faint">仅供参考，终审权在用人经理</span>
-              </span>
-            }
-            description={
-              <>
-                <Typography.Paragraph className="u-mb-8">{data.ai.summary}</Typography.Paragraph>
-                <ol className="plain-ol">
-                  {data.ai.ranking
-                    .slice()
-                    .sort((a, b) => a.rank - b.rank)
-                    .map((r) => (
-                      <li key={r.name}>
-                        <b>{r.name}</b> — {r.rationale}
-                      </li>
-                    ))}
-                </ol>
-                <Typography.Text type="secondary" className="u-meta u-block u-mt-8">
-                  风险提示：{data.ai.risks}
-                </Typography.Text>
-              </>
-            }
-          />
-        </>
-      )}
-    </Modal>
-  );
-}
 
 interface PendingMove {
   applicationId: string;
@@ -704,35 +602,11 @@ export function PipelinePage() {
     onError: (error) => message.error(extractErrorMessage(error, '加入失败')),
   });
 
-  const [compareData, setCompareData] = useState<CompareData | null>(null);
-  const compareMutation = useMutation({
-    mutationFn: () => applicationsApi.compare([...selected]),
-    onSuccess: setCompareData,
-    onError: (error) => message.error(extractErrorMessage(error, '对比失败')),
-  });
-
-  /** 发预筛链接（选中恰 1 人时可用；V2 1.2 邀约前核实硬性条件） */
-  const sendPrescreen = async () => {
-    const id = [...selected][0];
-    try {
-      const { token } = await applicationsApi.prescreenLink(id);
-      const url = `${window.location.origin}/portal/prescreen/${token}`;
-      try {
-        await navigator.clipboard.writeText(url);
-        message.success('预筛链接已复制（7 天内有效），请发送给候选人（薪资/到岗/出差三问）');
-      } catch {
-        modal.info({
-          title: '候选人预筛链接',
-          content: (
-            <Typography.Text copyable className="u-break-all">
-              {url}
-            </Typography.Text>
-          ),
-        });
-      }
-    } catch (error) {
-      message.error(extractErrorMessage(error, '获取链接失败'));
-    }
+  /** 候选人对比并入 Copilot：选 2–4 人，交给 Copilot 并排对比并给出依据 */
+  const compareInCopilot = () => {
+    const names = [...selected].map((id) => findCard(id)?.candidate.name).filter(Boolean);
+    const job = jobsQuery.data?.items.find((j) => j.id === jobId)?.title ?? '当前职位';
+    openCopilot({ prompt: `对比「${job}」的候选人：${names.join('、')}，给出各自优势、风险和推荐顺序` });
   };
 
   const findCard = (id: string) => boardQuery.data?.columns.flatMap((c) => c.applications).find((a) => a.id === id);
@@ -818,13 +692,10 @@ export function PipelinePage() {
               size="small"
               icon={<RobotOutlined />}
               disabled={selected.size < 2 || selected.size > 4}
-              loading={compareMutation.isPending}
-              onClick={() => compareMutation.mutate()}
+              title="选 2–4 人，交给 Copilot 对比"
+              onClick={compareInCopilot}
             >
-              AI 对比
-            </Button>
-            <Button size="small" disabled={selected.size !== 1} onClick={() => void sendPrescreen()}>
-              预筛链接
+              Copilot 对比
             </Button>
             <Button size="small" danger disabled={selected.size === 0} onClick={() => setBatchRejectOpen(true)}>
               批量淘汰
@@ -1170,7 +1041,6 @@ export function PipelinePage() {
         </Form>
       </FormModal>
 
-      <CompareModal data={compareData} loading={compareMutation.isPending} onClose={() => setCompareData(null)} />
 
       <CandidateDetailDrawer candidateId={detailId} onClose={closeDetail} />
     </div>

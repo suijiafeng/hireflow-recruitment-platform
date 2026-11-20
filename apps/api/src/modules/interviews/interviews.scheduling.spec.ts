@@ -9,7 +9,8 @@ import type { JwtUser } from '../../common/decorators/current-user.decorator';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
-import { InterviewPortalController } from './interview-portal.controller';
+import { PortalController } from '../portal/portal.controller';
+import { PortalService } from '../portal/portal.service';
 import { InterviewsController } from './interviews.controller';
 import { InterviewsService } from './interviews.service';
 
@@ -43,7 +44,7 @@ describe('面试排期 HTTP / 数据库回归', () => {
     }));
     await prisma.$connect();
     const module = await Test.createTestingModule({
-      controllers: [InterviewsController, InterviewPortalController],
+      controllers: [InterviewsController, PortalController],
       providers: [
         { provide: PrismaService, useValue: prisma }, ActivityLogService,
         {
@@ -51,8 +52,17 @@ describe('面试排期 HTTP / 数据库回归', () => {
           useFactory: (log: ActivityLogService) => new InterviewsService(prisma, log, {} as never, {
             push: jest.fn().mockResolvedValue(undefined),
             pushByPermission: jest.fn().mockResolvedValue(undefined),
-          } as never),
+          } as never, { moveToStageKind: jest.fn().mockResolvedValue(undefined) } as never),
           inject: [ActivityLogService],
+        },
+        {
+          // 候选人页只测面试部分：Offer / 入职 / 问答给空实现
+          provide: PortalService,
+          useFactory: (interviews: InterviewsService) => new PortalService(prisma, interviews, {
+            portalSection: jest.fn().mockResolvedValue(null),
+            hrContactFor: jest.fn().mockResolvedValue(null),
+          } as never, { portalSection: jest.fn().mockResolvedValue(null) } as never, {} as never),
+          inject: [InterviewsService],
         },
         { provide: APP_GUARD, useValue: {
           canActivate(context: ExecutionContext) {
@@ -90,8 +100,8 @@ describe('面试排期 HTTP / 数据库回归', () => {
       { id: 'c1', name: '候选人一', tags: [] }, { id: 'c2', name: '候选人二', tags: [] },
     ] });
     await prisma.application.createMany({ data: [
-      { id: 'a1', candidateId: 'c1', jobId: 'j1', stageId: 's1' },
-      { id: 'a2', candidateId: 'c2', jobId: 'j1', stageId: 's1' },
+      { id: 'a1', candidateId: 'c1', jobId: 'j1', stageId: 's1', portalToken: 'tok-a1', portalExpiresAt: new Date(Date.now() + 7 * 86_400_000) },
+      { id: 'a2', candidateId: 'c2', jobId: 'j1', stageId: 's1', portalToken: 'tok-a2', portalExpiresAt: new Date(Date.now() + 7 * 86_400_000) },
     ] });
   });
 
@@ -109,15 +119,21 @@ describe('面试排期 HTTP / 数据库回归', () => {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
   const interview = (id = 'i1', ids = ['u1'], applicationId = 'a1') => prisma.interview.create({
-    data: { id, applicationId, round: 1, durationMins: 60, portalToken: id,
-      portalExpiresAt: new Date(Date.now() + 7 * 86_400_000),
+    data: { id, applicationId, round: 1, durationMins: 60,
       interviewers: { create: ids.map((userId) => ({ userId })) } },
   });
   const slot = (id: string, userId: string, start: number, end: number, bookedBy?: string) =>
     prisma.interviewerSlot.create({ data: { id, userId, startAt: at(start), endAt: at(end), bookedBy } });
-  const pick = (id: string, slotId: string, startAt?: string) =>
-    post(`/portal/interviews/${id}/pick`, { slotId, startAt });
-  const view = async (id = 'i1') => (await fetch(`${base}/portal/interviews/${id}`)).json();
+  /** 候选人页：一条应聘一个令牌（tok-<应聘 id>），选时走 /portal/:token/interviews/:id/pick */
+  const tokenOf = async (interviewId: string) =>
+    (await prisma.application.findFirstOrThrow({ where: { interviews: { some: { id: interviewId } } } })).portalToken;
+  const pick = async (id: string, slotId: string, startAt?: string) =>
+    post(`/portal/${await tokenOf(id)}/interviews/${id}/pick`, { slotId, startAt });
+  const view = async (id = 'i1') => {
+    const body = await (await fetch(`${base}/portal/${await tokenOf(id)}`)).json();
+    const entry = (body.interviews ?? []).find((i: { id: string }) => i.id === id);
+    return { closed: body.status !== 'ACTIVE', slots: entry?.slots ?? [] };
+  };
   const bookings = () => prisma.interviewerSlot.findMany({ orderBy: { id: 'asc' } });
 
   it.each(['CANCELED', 'COMPLETED'] as const)('未选时的 %s 面试旧链接不能复活', async (status) => {
@@ -148,7 +164,7 @@ describe('面试排期 HTTP / 数据库回归', () => {
     await slot('past', 'u1', -100, -99);
     expect((await pick('i1', 'short')).status).toBe(409);
     expect((await pick('i1', 'past')).status).toBe(409);
-    expect((await post('/portal/interviews/i1/pick', { slotId: {} })).status).toBe(400);
+    expect((await post('/portal/tok-a1/interviews/i1/pick', { slotId: {} })).status).toBe(400);
     expect((await pick('i1', 'short', 'invalid')).status).toBe(400);
     expect((await bookings()).every((s) => s.bookedBy === null)).toBe(true);
   });
@@ -166,31 +182,32 @@ describe('面试排期 HTTP / 数据库回归', () => {
   it('选时链接过期后返回 410（PORTAL_EXPIRED），不能再选；不存在的令牌是 404', async () => {
     await interview();
     await slot('t1', 'u1', 2, 4);
-    await prisma.interview.update({ where: { id: 'i1' }, data: { portalExpiresAt: new Date(Date.now() - 1000) } });
-    const res = await fetch(`${base}/portal/interviews/i1`);
+    await prisma.application.update({ where: { id: 'a1' }, data: { portalExpiresAt: new Date(Date.now() - 1000) } });
+    const res = await fetch(`${base}/portal/tok-a1`);
     expect(res.status).toBe(410);
     expect((await res.json()).code).toBe('PORTAL_EXPIRED');
     expect((await pick('i1', 't1')).status).toBe(410);
     expect((await bookings())[0].bookedBy).toBeNull();
-    const missing = await fetch(`${base}/portal/interviews/nope`);
+    const missing = await fetch(`${base}/portal/nope`);
     expect(missing.status).toBe(404);
     expect((await missing.json()).code).toBe('PORTAL_INVALID');
   });
 
-  it('选定时间后链接只保留到面试开始后 1 天；重新生成链接后旧令牌立即失效', async () => {
+  it('选定时间后链接至少保留到面试开始后 1 天；重新生成链接后旧令牌立即失效', async () => {
     await interview();
     await slot('t1', 'u1', 2, 4);
-    expect((await pick('i1', 't1')).status).toBe(201);
-    const picked = await prisma.interview.findUniqueOrThrow({ where: { id: 'i1' } });
-    expect(picked.portalExpiresAt).toEqual(new Date(at(2).getTime() + 86_400_000));
+    await prisma.application.update({ where: { id: 'a1' }, data: { portalExpiresAt: new Date(Date.now() + 60_000) } });
+    expect((await pick('i1', 't1')).status).toBe(200);
+    const picked = await prisma.application.findUniqueOrThrow({ where: { id: 'a1' } });
+    expect(picked.portalExpiresAt!.getTime()).toBeGreaterThanOrEqual(at(2).getTime() + 86_400_000);
 
     await interview('i2', ['u1'], 'a2');
     const rotated = await post('/interviews/i2/self-schedule-link', { rotate: true });
     expect(rotated.status).toBe(201);
     const { token } = await rotated.json();
-    expect(token).not.toBe('i2');
-    expect((await fetch(`${base}/portal/interviews/i2`)).status).toBe(404);
-    expect((await fetch(`${base}/portal/interviews/${token}`)).status).toBe(200);
+    expect(token).not.toBe('tok-a2');
+    expect((await fetch(`${base}/portal/tok-a2`)).status).toBe(404);
+    expect((await fetch(`${base}/portal/${token}`)).status).toBe(200);
     // 有效期内重发：复用同一令牌并顺延有效期
     const again = await (await post('/interviews/i2/self-schedule-link')).json();
     expect(again.token).toBe(token);
@@ -201,7 +218,7 @@ describe('面试排期 HTTP / 数据库回归', () => {
     await slot('t1', 'u1', 2, 4);
     await slot('t2', 'u2', 3, 5);
     expect((await view()).slots).toEqual([{ id: 't1', startAt: at(3).toISOString(), endAt: at(4).toISOString() }]);
-    expect((await pick('i1', 't1', at(3).toISOString())).status).toBe(201);
+    expect((await pick('i1', 't1', at(3).toISOString())).status).toBe(200);
     expect((await bookings()).map((s) => s.bookedBy)).toEqual(['i1', 'i1']);
     expect((await prisma.interview.findUniqueOrThrow({ where: { id: 'i1' } })).scheduledAt).toEqual(at(3));
   });
@@ -212,10 +229,10 @@ describe('面试排期 HTTP / 数据库回归', () => {
     await slot('t2', 'u2', 3, 4);
     await slot('t3', 'u2', 5, 6);
     expect((await view()).slots).toHaveLength(2);
-    expect((await pick('i1', 't1', at(5).toISOString())).status).toBe(201);
+    expect((await pick('i1', 't1', at(5).toISOString())).status).toBe(200);
     expect((await bookings()).map((s) => s.bookedBy)).toEqual(['i1', null, 'i1']);
     await interview('i2', ['u2'], 'a2');
-    expect((await pick('i2', 't2')).status).toBe(201);
+    expect((await pick('i2', 't2')).status).toBe(200);
   });
 
   it('创建直接带时间也检查撞期并占档；没有预维护空闲档仍可人工排期', async () => {
@@ -247,8 +264,8 @@ describe('面试排期 HTTP / 数据库回归', () => {
     await slot('t1', 'u1', 2, 3);
     await slot('t2', 'u1', 4, 5);
     const results = await Promise.all([pick('i1', 't1'), pick('i1', 't2')]);
-    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
-    const winner = results.findIndex((r) => r.status === 201);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    const winner = results.findIndex((r) => r.status === 200);
     const slots = await bookings();
     expect(slots[winner].bookedBy).toBe('i1');
     expect(slots[1 - winner].bookedBy).toBeNull();
@@ -268,7 +285,7 @@ describe('面试排期 HTTP / 数据库回归', () => {
     await interview();
     await slot('t1', 'u1', 2, 3);
     const [picked, canceled] = await Promise.all([pick('i1', 't1'), post('/interviews/i1/cancel')]);
-    expect([201, 400]).toContain(picked.status);
+    expect([200, 400]).toContain(picked.status);
     expect(canceled.status).toBe(201);
     expect((await prisma.interview.findUniqueOrThrow({ where: { id: 'i1' } })).status).toBe('CANCELED');
     expect((await bookings())[0].bookedBy).toBeNull();
@@ -280,7 +297,7 @@ describe('面试排期 HTTP / 数据库回归', () => {
     await slot('t2', 'u1', 4, 5);
     const [picked, scheduled] = await Promise.all([pick('i1', 't1'),
       post('/interviews/i1/schedule', { scheduledAt: at(4).toISOString() })]);
-    expect([201, 409]).toContain(picked.status);
+    expect([200, 409]).toContain(picked.status);
     expect(scheduled.status).toBe(201);
     expect((await bookings()).map((s) => s.bookedBy)).toEqual([null, 'i1']);
     expect((await prisma.interview.findUniqueOrThrow({ where: { id: 'i1' } })).scheduledAt).toEqual(at(4));

@@ -1,6 +1,6 @@
 /**
  * 劳动合同正文：由合同变量渲染出条款，新员工门户与后台共用同一份文本，
- * 保证「签署前阅读」的内容就是存证的内容。接入真实电子签后以服务商返回的 PDF 为准。
+ * 保证新员工确认前阅读的内容和存档的内容一致。
  */
 export interface ContractVariables {
   companyName?: string;

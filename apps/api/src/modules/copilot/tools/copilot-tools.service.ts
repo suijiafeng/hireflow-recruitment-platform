@@ -2,7 +2,8 @@ import {
   APPLICATION_STATUS_LABEL,
   EVALUATION_CONCLUSION_LABEL,
   JOB_STATUS_LABEL,
-  OFFER_APPROVAL_STATUS_LABEL,
+  OFFER_STATUS_LABEL,
+  roundLabel,
   OFFER_DECISION_LABEL,
   ACTIVITY_ACTIONS,
   COPILOT_READ_TOOLS,
@@ -20,6 +21,7 @@ import { ActivityLogService } from '../../activity-log/activity-log.service';
 import { AnalyticsService } from '../../analytics/analytics.service';
 import { ApplicationsService } from '../../applications/applications.service';
 import { CandidatesService } from '../../candidates/candidates.service';
+import { HelpdeskService } from '../../helpdesk/helpdesk.service';
 import { InterviewsService } from '../../interviews/interviews.service';
 import { JobsService } from '../../jobs/jobs.service';
 import { OffersService } from '../../offers/offers.service';
@@ -109,7 +111,7 @@ export class CopilotToolsService {
       description: '列出职位及招聘进度（状态、编制、已占用 HC、应聘人数）。',
       parameters: OBJ({
         keyword: { type: 'string' },
-        status: { type: 'string', enum: ['OPEN', 'PAUSED', 'DRAFT', 'PENDING_APPROVAL', 'CLOSED'] },
+        status: { type: 'string', enum: ['OPEN', 'PAUSED', 'DRAFT', 'CLOSED'] },
       }),
     },
     {
@@ -129,8 +131,8 @@ export class CopilotToolsService {
     {
       name: 'offer_status',
       kind: 'read',
-      anyOf: [PERMISSIONS.OFFER_INITIATE, PERMISSIONS.OFFER_APPROVE],
-      description: '查询 Offer 审批与答复状态，可按候选人姓名过滤（不返回薪资）。',
+      anyOf: [PERMISSIONS.OFFER_INITIATE, PERMISSIONS.OFFER_READ],
+      description: '查询 Offer 发送与答复状态，可按候选人姓名过滤（不返回薪资）。',
       parameters: OBJ({ keyword: { type: 'string' } }),
     },
     {
@@ -143,8 +145,33 @@ export class CopilotToolsService {
     {
       name: 'my_todos',
       kind: 'read',
-      description: '当前用户的待办汇总（待初筛简历、待提交面评、待审批 Offer 等）。',
+      description: '当前用户的待办汇总（待初筛简历、待提交面评、即将到期的 Offer、待确认入职等）。',
       parameters: OBJ({}),
+    },
+    {
+      name: 'compare_candidates',
+      kind: 'read',
+      permissions: [PERMISSIONS.CANDIDATE_READ],
+      description:
+        '并排对比同一职位的 2–4 位候选人：匹配分、亮点与风险、面评结论，并给出 AI 综合意见（仅供参考，决定权在人）。' +
+        'applicationIds 取自 get_candidate / job_pipeline 返回的 applicationId。',
+      parameters: OBJ(
+        { applicationIds: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 4 } },
+        ['applicationIds'],
+      ),
+    },
+    {
+      name: 'funnel_diagnosis',
+      kind: 'read',
+      permissions: [PERMISSIONS.DASHBOARD_VIEW],
+      description: '诊断一个职位的招聘漏斗：哪个环节流失最多、可能的原因与建议（AI 分析，基于漏斗数据）。',
+      parameters: OBJ({ jobId: { type: 'string' } }, ['jobId']),
+    },
+    {
+      name: 'search_policies',
+      kind: 'read',
+      description: '查阅公司制度文档（考勤、休假、福利、入职须知等）并回答，带出处。',
+      parameters: OBJ({ question: { type: 'string', description: '要查的问题' } }, ['question']),
     },
     {
       name: 'move_candidate_stage',
@@ -222,6 +249,7 @@ export class CopilotToolsService {
     private readonly offers: OffersService,
     private readonly analytics: AnalyticsService,
     private readonly activityLog: ActivityLogService,
+    private readonly helpdesk: HelpdeskService,
   ) {}
 
   def(name: string): ToolDef | undefined {
@@ -275,6 +303,12 @@ export class CopilotToolsService {
         return this.funnelInsights(args, user);
       case 'my_todos':
         return { data: await this.analytics.todos(user), summary: '已汇总' };
+      case 'compare_candidates':
+        return this.compareCandidates(args, user);
+      case 'funnel_diagnosis':
+        return this.funnelDiagnosis(args, user);
+      case 'search_policies':
+        return this.searchPolicies(args);
       default:
         throw new ToolArgError(`未知工具：${name}`);
     }
@@ -346,11 +380,12 @@ export class CopilotToolsService {
         stages: stages.filter((s) => s.jobId === a.job.id).map((s) => s.name),
         matchScore: a.matchScore,
         offer: a.offer
-          ? { approvalStatus: label(OFFER_APPROVAL_STATUS_LABEL, a.offer.approvalStatus), decision: a.offer.decision ? label(OFFER_DECISION_LABEL, a.offer.decision) : null }
+          ? { status: label(OFFER_STATUS_LABEL, a.offer.status), decision: a.offer.decision ? label(OFFER_DECISION_LABEL, a.offer.decision) : null }
           : null,
         interviews: a.interviews.map((i) => ({
           interviewId: i.id,
           round: i.round,
+          roundLabel: roundLabel(i.round),
           status: i.status,
           scheduledAt: iso(i.scheduledAt),
           interviewers: i.interviewers.map((x) => x.user.name),
@@ -368,7 +403,7 @@ export class CopilotToolsService {
 
   private async listJobs(args: Args, user: JwtUser): Promise<ReadResult> {
     const keyword = str(args, 'keyword', { max: 40, optional: true });
-    const status = oneOf(args, 'status', ['OPEN', 'PAUSED', 'DRAFT', 'PENDING_APPROVAL', 'CLOSED'] as const, true);
+    const status = oneOf(args, 'status', ['OPEN', 'PAUSED', 'DRAFT', 'CLOSED'] as const, true);
     const page = await this.jobs.list({ page: 1, pageSize: 20, keyword, status } as never, user);
     const items = page.items.map((j) => ({
       id: j.id,
@@ -446,7 +481,7 @@ export class CopilotToolsService {
         offerId: o.id,
         candidate: o.application.candidate.name,
         job: o.application.job.title,
-        approvalStatus: label(OFFER_APPROVAL_STATUS_LABEL, o.approvalStatus),
+        status: label(OFFER_STATUS_LABEL, o.status),
         decision: o.decision ? label(OFFER_DECISION_LABEL, o.decision) : null,
         expiresAt: iso(o.expiresAt),
       }));
@@ -460,6 +495,39 @@ export class CopilotToolsService {
     }
     const funnel = await this.analytics.funnel(jobId, user);
     return { data: funnel, summary: `${funnel.job.title} · ${funnel.stages.length} 个阶段` };
+  }
+
+  private async compareCandidates(args: Args, user: JwtUser): Promise<ReadResult> {
+    const ids = strList(args, 'applicationIds', { maxItems: 4, maxLength: 64 });
+    if (ids.length < 2) throw new ToolArgError('对比至少需要 2 位候选人');
+    const result = await this.applications.compare(ids, user);
+    const guard = new UntrustedCollector();
+    const data = {
+      ...result,
+      candidates: result.candidates.map((c) => ({
+        ...c,
+        tags: guard.tags(c.tags),
+        highlights: guard.wrap('match_highlights', c.highlights, 300),
+        risks: guard.wrap('match_risks', c.risks, 300),
+        evaluations: c.evaluations.map((e) => ({ ...e, comments: guard.wrap('evaluation', e.comments, 200) })),
+      })),
+    };
+    return { data, summary: `对比 ${result.candidates.length} 位`, injectionSuspected: guard.suspected };
+  }
+
+  private async funnelDiagnosis(args: Args, user: JwtUser): Promise<ReadResult> {
+    const jobId = str(args, 'jobId', { max: 64 });
+    const result = await this.analytics.insight(jobId, user);
+    return { data: result, summary: '已诊断' };
+  }
+
+  private async searchPolicies(args: Args): Promise<ReadResult> {
+    const question = str(args, 'question', { max: 200 });
+    const result = await this.helpdesk.ask(question);
+    return {
+      data: { answer: result.answer, sources: result.sources },
+      summary: result.sources.length ? `参考 ${result.sources.length} 份制度` : '没有找到相关制度',
+    };
   }
 
   // ---------------------------------------------------------------- 写工具：提议

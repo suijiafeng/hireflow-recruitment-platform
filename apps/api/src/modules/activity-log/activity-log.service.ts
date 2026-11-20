@@ -43,12 +43,16 @@ export class ActivityLogService {
     entityType: string,
     entityId: string,
     payload?: Record<string, unknown>,
+    tx?: Prisma.TransactionClient,
   ) {
-    return this.record(null, action, entityType, entityId, {
-      ...payload,
-      auto: true,
-      triggeredBy: trigger?.name ?? null,
-    } as Prisma.InputJsonValue);
+    return this.record(
+      null,
+      action,
+      entityType,
+      entityId,
+      { ...payload, auto: true, triggeredBy: trigger?.name ?? null } as Prisma.InputJsonValue,
+      tx,
+    );
   }
 
   /** 审计日志：全局最近操作；actionPrefixes 给定时只取这些前缀的动作（如设置页「最近权限变更」） */
@@ -67,15 +71,5 @@ export class ActivityLogService {
       }),
     ]);
     return { total, page, pageSize, items };
-  }
-
-  /** 查询某实体的时间轴（倒序） */
-  async timeline(entityType: string, entityId: string, limit = 50) {
-    return this.prisma.activityLog.findMany({
-      where: { entityType, entityId },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      include: { actor: { select: { id: true, name: true } } },
-    });
   }
 }

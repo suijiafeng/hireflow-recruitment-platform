@@ -12,6 +12,9 @@ export const COPILOT_READ_TOOLS = {
   offer_status: { running: '正在查询 Offer 状态…', done: '已查询 Offer 状态' },
   funnel_insights: { running: '正在分析招聘漏斗…', done: '已分析招聘漏斗' },
   my_todos: { running: '正在汇总待办…', done: '已汇总待办' },
+  compare_candidates: { running: '正在对比候选人…', done: '已对比候选人' },
+  funnel_diagnosis: { running: '正在诊断招聘漏斗…', done: '已诊断招聘漏斗' },
+  search_policies: { running: '正在查阅公司制度…', done: '已查阅公司制度' },
 } as const;
 
 /**

@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { ACTIVITY_ACTIONS, PERMISSIONS } from '@hireflow/shared';
+import { ACTIVITY_ACTIONS, LEGACY_STAGE_KIND, PERMISSIONS, STAGE_KIND_LABEL, StageKind } from '@hireflow/shared';
 import { pendingScreeningWhere } from '../candidates/candidates.service';
 import { departmentScopeOf, inDepartmentScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
@@ -27,8 +27,7 @@ export class AnalyticsService {
   /** 待办事项聚合 To-Do Center */
   async todos(user: JwtUser) {
     const now = new Date();
-    // 用人经理（本部门）：各计数与对应列表页同口径，只算本部门职位；
-    // 否则大盘提示「待审批 1」而录用管理页里一条都找不到
+    // 用人经理（本部门）：各计数与对应列表页同口径，只算本部门职位
     const dept = this.deptScopeOf(user);
     const appScope = dept ? { application: { job: { departmentId: { in: dept } } } } : {};
     // 待处理新简历：按人计（与候选人列表「待初筛」筛选同口径，点进去看到的人数一致）；
@@ -45,22 +44,17 @@ export class AnalyticsService {
         evaluations: { none: { interviewerId: user.sub } },
       },
     });
-    const pendingOffers = user.permissions.includes(PERMISSIONS.OFFER_APPROVE)
-      ? await this.prisma.offer.count({ where: { approvalStatus: 'PENDING', ...appScope } })
-      : null;
-    // Offer 双待办：通知会被刷走，待办卡才是工作驱动
+    // Offer 待办：通知会被刷走，待办卡才是工作驱动
     const canInitiate = user.permissions.includes(PERMISSIONS.OFFER_INITIATE);
-    const rejectedOffers = canInitiate
-      ? await this.prisma.offer.count({ where: { approvalStatus: 'REJECTED', ...appScope } })
-      : null;
     const offersDue = canInitiate
       ? await this.prisma.offer.count({
           where: {
             ...appScope,
             OR: [
-              { approvalStatus: 'EXPIRED', extendedOnce: false }, // 已失效可续期
+              { status: 'DRAFT' }, // 迁移前遗留的未发出 Offer
+              { status: 'EXPIRED', extendedOnce: false }, // 已失效可续期
               {
-                approvalStatus: 'SENT',
+                status: 'SENT',
                 decision: null,
                 expiresAt: { lte: new Date(now.getTime() + 24 * 3600 * 1000) }, // 24h 内到期
               },
@@ -72,26 +66,18 @@ export class AnalyticsService {
     const onboardingInProgress = canReadOnboarding
       ? await this.prisma.onboarding.count({ where: { status: 'IN_PROGRESS', ...appScope } })
       : null;
-    // 待人工核对材料（低置信度阻断）：documents 为 JSON 数组，量小直接内存过滤
-    // 「材料待核对」是 HR 的活：IT 看不到证件内容，这个数字对他没有意义
-    const docsNeedReview = user.permissions.includes(PERMISSIONS.ONBOARDING_MANAGE)
-      ? await this.prisma.onboarding
-          .findMany({ where: { status: 'IN_PROGRESS', ...appScope }, select: { documents: true } })
-          .then((inProgress) =>
-            inProgress.reduce((sum, o) => {
-              const docs = (o.documents as Array<{ needsReview?: boolean }> | null) ?? [];
-              return sum + docs.filter((d) => d.needsReview).length;
-            }, 0),
-          )
+    // 入职资料已齐、等 HR 确认入职的人数
+    const onboardingReady = user.permissions.includes(PERMISSIONS.ONBOARDING_MANAGE)
+      ? await this.prisma.onboarding.count({
+          where: { status: 'IN_PROGRESS', infoSubmittedAt: { not: null }, contract: { signStatus: 'SIGNED' }, ...appScope },
+        })
       : null;
     return {
       newResumes,
       myPendingEvaluations,
-      pendingOffers,
-      rejectedOffers,
       offersDue,
       onboardingInProgress,
-      docsNeedReview,
+      onboardingReady,
     };
   }
 
@@ -138,14 +124,22 @@ export class AnalyticsService {
     });
     const stageIndexById = new Map(job.stages.map((s, i) => [s.id, i]));
     const stageIndexByName = new Map(job.stages.map((s, i) => [s.name, i]));
-    const lastIndex = job.stages.length - 1;
+    const stageIndexByKind = new Map(job.stages.filter((s) => s.kind !== StageKind.CUSTOM).map((s, _i) => [s.kind, job.stages.indexOf(s)]));
+    /** 流转日志 → 阶段下标：新日志带 toStageId / toKind；旧日志只有阶段名，按简化前的名字归并到阶段类型 */
+    const indexOfEvent = (payload: { to?: string; toStageId?: string; toKind?: StageKind } | null) => {
+      if (!payload) return undefined;
+      if (payload.toStageId && stageIndexById.has(payload.toStageId)) return stageIndexById.get(payload.toStageId);
+      const kind = payload.toKind ?? (payload.to ? LEGACY_STAGE_KIND[payload.to] : undefined);
+      if (kind && stageIndexByKind.has(kind)) return stageIndexByKind.get(kind);
+      return payload.to ? stageIndexByName.get(payload.to) : undefined;
+    };
 
-    // 当前停留：中间列只计 ACTIVE（淘汰/撤回已离开漏斗），末列以 status=HIRED 为准
+    // 当前停留：只计流程中和已入职（淘汰/撤回已离开漏斗）；已入职的人留在「入职」列
     const counts = job.stages.map(() => 0);
     for (const a of apps) {
       const i = stageIndexById.get(a.stageId);
       if (i == null) continue;
-      if (a.status === 'ACTIVE' || (a.status === 'HIRED' && i === lastIndex)) counts[i] += 1;
+      if (a.status === 'ACTIVE' || a.status === 'HIRED') counts[i] += 1;
     }
 
     // 到达过：每条应聘的最深足迹 = max(建档落首列 0, 当前所在列, 历史流转日志里所有 payload.to)
@@ -160,9 +154,8 @@ export class AnalyticsService {
     for (const a of apps) deepest.set(a.id, stageIndexById.get(a.stageId) ?? 0);
     for (const ev of events) {
       if (!ev.entityId) continue;
-      const to = (ev.payload as { to?: string } | null)?.to;
-      const i = to ? stageIndexByName.get(to) : undefined;
-      if (i == null) continue; // 阶段被改名/删除后的历史日志：对不上就不计，不猜
+      const i = indexOfEvent(ev.payload as { to?: string; toStageId?: string; toKind?: StageKind } | null);
+      if (i == null) continue; // 自定义阶段被删除后的历史日志：对不上就不计，不猜
       deepest.set(ev.entityId, Math.max(deepest.get(ev.entityId) ?? 0, i));
     }
     const reached = job.stages.map(
@@ -174,13 +167,14 @@ export class AnalyticsService {
       stages: job.stages.map((stage, i) => ({
         id: stage.id,
         name: stage.name,
+        kind: stage.kind,
         /** 当前停留人数 */
         current: counts[i],
         /** 历史上到达过该阶段（含之后阶段）的人数 */
         reached: reached[i],
         /**
          * 相对上一阶段的转化率（0-1，首阶段为 null）。分母只算上一阶段「已有结果」的人：
-         * 还停在上一阶段的在途者（如 Offer 待审批）既没转化也没流失，算进去会把进行中的流程误判成流失。
+         * 还停在上一阶段的在途者（如 Offer 待答复）既没转化也没流失，算进去会把进行中的流程误判成流失。
          */
         conversion: (() => {
           if (i === 0) return null;
@@ -191,7 +185,7 @@ export class AnalyticsService {
     };
   }
 
-  /** AI 招聘健康度诊断 */
+  /** AI 招聘健康度诊断（Copilot 工具 funnel_diagnosis 调用） */
   async insight(jobId: string, user: JwtUser) {
     const funnel = await this.funnel(jobId, user);
     const { data, meta } = await this.ai.funnelInsight({
@@ -406,9 +400,11 @@ export class AnalyticsService {
     for (const ev of stageEvents) {
       const p = ev.payload as { from?: string; to?: string } | null;
       if (!p?.from || !p?.to || !ev.entityId) continue;
+      // 简化前的「一面 / 二面」「待入职 / 已入职」归并到新的阶段名
+      const legacy = (name: string) => (LEGACY_STAGE_KIND[name] ? STAGE_KIND_LABEL[LEGACY_STAGE_KIND[name]] : name);
       byApp.set(ev.entityId, [
         ...(byApp.get(ev.entityId) ?? []),
-        { at: ev.createdAt, from: p.from, to: p.to },
+        { at: ev.createdAt, from: legacy(p.from), to: legacy(p.to) },
       ]);
     }
     const stayByStage = new Map<string, number[]>();

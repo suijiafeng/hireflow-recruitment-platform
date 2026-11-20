@@ -180,6 +180,30 @@ export class MockCopilotProvider implements CopilotProvider {
       if (next) return next;
     }
     const jobId = turn.context?.type === 'job' ? turn.context.id : null;
+    if (/制度|政策|年假|休假|考勤|报销|福利|公积金|社保/.test(t)) {
+      const next = call('search_policies', { question: t.slice(0, 200) });
+      if (next) return next;
+    }
+    if (/对比|比较/.test(t) && jobId) {
+      if (!r.has('job_pipeline')) {
+        const next = call('job_pipeline', { jobId });
+        if (next) return next;
+      }
+      const ids = ((r.get('job_pipeline')?.data?.columns ?? []) as Json[])
+        .flatMap((c) => c.longestWaiting ?? [])
+        .filter((a: Json) => a.matchScore != null)
+        .sort((a: Json, b: Json) => b.matchScore - a.matchScore)
+        .slice(0, 3)
+        .map((a: Json) => a.applicationId);
+      if (ids.length >= 2) {
+        const next = call('compare_candidates', { applicationIds: ids });
+        if (next) return next;
+      }
+    }
+    if (/诊断|原因|为什么/.test(t) && /漏斗|转化|流失/.test(t) && jobId) {
+      const next = call('funnel_diagnosis', { jobId });
+      if (next) return next;
+    }
     if (/漏斗|转化|瓶颈|卡在/.test(t)) {
       if (!jobId && !r.has('list_jobs')) {
         const next = call('list_jobs', { status: 'OPEN' });
@@ -252,7 +276,7 @@ export class MockCopilotProvider implements CopilotProvider {
           for (const a of d.applications ?? []) {
             const evals = (a.interviews ?? []).flatMap((i: Json) => i.evaluations ?? []);
             const evalText = evals.length ? `，面评 ${evals.map((e: Json) => `${e.interviewer}：${e.conclusion ?? '—'}`).join('；')}` : '';
-            parts.push(`- **${a.job}**：当前「${a.stage}」${a.matchScore != null ? `，匹配分 ${a.matchScore}` : ''}${evalText}${a.offer ? `，Offer ${a.offer.approvalStatus}` : ''}`);
+            parts.push(`- **${a.job}**：当前「${a.stage}」${a.matchScore != null ? `，匹配分 ${a.matchScore}` : ''}${evalText}${a.offer ? `，Offer ${a.offer.status}${a.offer.decision ? ` / ${a.offer.decision}` : ''}` : ''}`);
           }
           break;
         }
@@ -270,13 +294,13 @@ export class MockCopilotProvider implements CopilotProvider {
         case 'upcoming_interviews': {
           const items: Json[] = d.items ?? [];
           parts.push(items.length ? `未来 ${d.days} 天有 **${items.length}** 场面试：` : `未来 ${d.days} 天没有已排期的面试。`);
-          if (items.length) parts.push(items.slice(0, 10).map((i) => `- ${i.localTime} · ${i.candidate}（${i.job}，第 ${i.round} 轮）· 面试官 ${i.interviewers.join('、')}`).join('\n'));
+          if (items.length) parts.push(items.slice(0, 10).map((i) => `- ${i.localTime} · ${i.candidate}（${i.job}，${i.roundLabel ?? `第 ${i.round} 轮`}）· 面试官 ${i.interviewers.join('、')}`).join('\n'));
           break;
         }
         case 'offer_status': {
           const items: Json[] = d.items ?? [];
           parts.push(items.length ? `Offer 状态（${items.length} 条）：` : '没有找到相关 Offer。');
-          if (items.length) parts.push(items.slice(0, 10).map((o) => `- ${o.candidate}（${o.job}）：${o.approvalStatus}${o.decision ? ` / ${o.decision}` : ''}`).join('\n'));
+          if (items.length) parts.push(items.slice(0, 10).map((o) => `- ${o.candidate}（${o.job}）：${o.status}${o.decision ? ` / ${o.decision}` : ''}`).join('\n'));
           break;
         }
         case 'funnel_insights': {
@@ -292,15 +316,29 @@ export class MockCopilotProvider implements CopilotProvider {
           }
           break;
         }
+        case 'compare_candidates': {
+          const rows = ((d.candidates ?? []) as Json[]).map((c) => `| ${c.name} | ${c.matchScore ?? '—'} | ${unwrap(c.highlights) || '—'} |`);
+          parts.push(`**${d.jobTitle}** 候选人对比：`);
+          parts.push(['| 候选人 | 匹配分 | 亮点 |', '| --- | --- | --- |', ...rows].join('\n'));
+          if (d.ai?.summary) parts.push(`AI 综合意见（仅供参考）：${d.ai.summary}`);
+          break;
+        }
+        case 'funnel_diagnosis': {
+          parts.push(`漏斗诊断：${d.insight ?? '暂无结论'}`);
+          break;
+        }
+        case 'search_policies': {
+          parts.push(String(d.answer ?? '没有找到相关制度。'));
+          if (d.sources?.length) parts.push(`出处：${(d.sources as Json[]).map((x) => `《${x.title}》`).join('、')}`);
+          break;
+        }
         case 'my_todos': {
           const labels: Record<string, string> = {
             newResumes: '待初筛简历',
             myPendingEvaluations: '待提交面评',
-            pendingOffers: '待审批 Offer',
-            rejectedOffers: '被驳回的 Offer',
             offersDue: '即将到期的 Offer',
             onboardingInProgress: '入职进行中',
-            docsNeedReview: '待核对材料',
+            onboardingReady: '资料齐全、待确认入职',
           };
           const rows = Object.entries(d).filter(([, v]) => v != null).map(([k, v]) => `- ${labels[k] ?? k}：${v}`);
           parts.push(rows.length ? `你的待办：\n${rows.join('\n')}` : '目前没有待办。');
@@ -313,7 +351,7 @@ export class MockCopilotProvider implements CopilotProvider {
       }
     }
     if (!parts.length) {
-      const tools = [...turn.available].filter((t) => t !== 'my_todos');
+      const tools = [...turn.available].filter((t) => t !== 'my_todos' && t !== 'search_policies');
       return tools.length
         ? '我可以帮你查询候选人、职位看板、面试安排、Offer 状态和招聘漏斗，也可以起草推进阶段、安排面试、添加备注等操作（都需要你确认后才执行）。试试问我：「本周有哪些面试？」'
         : '你的账号目前没有可查询的招聘数据权限，如需使用请联系管理员。';
@@ -325,7 +363,7 @@ export class MockCopilotProvider implements CopilotProvider {
 }
 
 function toolTitle(name: string) {
-  return { search_candidates: '查询候选人', get_candidate: '读取档案', list_jobs: '查询职位', job_pipeline: '读取看板', upcoming_interviews: '查询面试', offer_status: '查询 Offer', funnel_insights: '漏斗分析', my_todos: '汇总待办' }[name] ?? '操作';
+  return { search_candidates: '查询候选人', get_candidate: '读取档案', list_jobs: '查询职位', job_pipeline: '读取看板', upcoming_interviews: '查询面试', offer_status: '查询 Offer', funnel_insights: '漏斗分析', my_todos: '汇总待办', compare_candidates: '对比候选人', funnel_diagnosis: '漏斗诊断', search_policies: '查阅制度' }[name] ?? '操作';
 }
 
 /** 按 2~4 个字符切片，模拟 token 流 */

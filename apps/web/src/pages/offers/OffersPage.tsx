@@ -1,25 +1,18 @@
 import { FieldTimeOutlined, InfoCircleOutlined, AuditOutlined } from '@ant-design/icons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  OFFER_APPROVAL_STATUS_LABEL,
-  OFFER_DECISION_LABEL,
-  PERMISSIONS,
-  type OfferApprovalStatus,
-  type OfferDecision,
-} from '@hireflow/shared';
-import { Modal, Spin, Table, Typography } from 'antd';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { OFFER_DECISION_LABEL, PERMISSIONS, type OfferDecision } from '@hireflow/shared';
+import { Spin, Table } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
+import { useCopyPortalLink } from '../../hooks/usePortalLink';
 import { offersApi } from '../../api';
 import { extractErrorMessage } from '../../api/client';
 import { QueryErrorResult } from '../../components/QueryErrorResult';
 import { RowActions } from '../../components/RowActions';
 import { useSyncedTableScroll } from '../../hooks/useSyncedTableScroll';
-import type { Offer, RetentionHint } from '../../api/types';
+import type { Offer } from '../../api/types';
 import { DeclineEntryModal } from './DeclineEntryModal';
-import { RejectApprovalModal } from './RejectApprovalModal';
-import { ResubmitModal } from './ResubmitModal';
 import { useAuthStore } from '../../stores/auth';
 import { useDrawerParam, useUrlParams, useUrlState } from '../../hooks/useUrlState';
 import { CandidateDetailDrawer } from '../../components/CandidateDetailDrawer';
@@ -28,65 +21,20 @@ import { useAppDialogs } from '../../hooks/useAppDialogs';
 
 /** 分组顺序 = 流程顺序，待办排最上 */
 const GROUPS: Array<{ key: string; label: string; dot: string; tone: string }> = [
-  { key: 'PENDING', label: '待审批', dot: 'hf-dot hf-dot--on', tone: '' },
-  { key: 'REJECTED', label: '已驳回 · 待修改重提', dot: 'hf-dot hf-dot--err', tone: 'hf-state--err' },
-  { key: 'APPROVED', label: '已批准 · 待发送', dot: 'hf-dot hf-dot--on', tone: '' },
+  // 草稿只来自旧数据迁移（以前的待审批 / 已驳回）：新建的 Offer 直接发出
+  { key: 'DRAFT', label: '草稿 · 待发送', dot: 'hf-dot hf-dot--on', tone: '' },
   { key: 'SENT', label: '已发送 · 待答复', dot: 'hf-dot hf-dot--alert', tone: 'hf-state--warn' },
   { key: 'EXPIRED', label: '超期未答复', dot: 'hf-dot hf-dot--err', tone: 'hf-state--err' },
   { key: 'ACCEPTED', label: '已接受', dot: 'hf-dot hf-dot--ok', tone: 'hf-state--ok' },
   { key: 'DECLINED', label: '已拒绝', dot: 'hf-dot hf-dot--off', tone: 'hf-state--off' },
 ];
 
-/** AI 留存预测（辅助参考）。从操作列的「···」里唤起，不再占一个常驻链接位 */
-function RetentionModal({ offerId, onClose }: { offerId: string | null; onClose: () => void }) {
-  const [hint, setHint] = useState<RetentionHint | null>(null);
-  const retentionMutation = useMutation({
-    mutationFn: (id: string) => offersApi.retention(id),
-    onSuccess: setHint,
-  });
-  return (
-    <Modal
-      className="hf-modal"
-      title="AI 留存预测（辅助参考）"
-      open={Boolean(offerId)}
-      onCancel={onClose}
-      footer={null}
-      destroyOnHidden
-      afterOpenChange={(open) => {
-        if (open && offerId) {
-          setHint(null);
-          retentionMutation.mutate(offerId);
-        }
-      }}
-    >
-      {retentionMutation.isPending || !hint ? (
-        <Spin size="small" />
-      ) : (
-        <>
-          <span className="hf-kpi-num">{Math.round(hint.probability * 100)}%</span>
-          <span className="hf-muted u-ml-8">预计通过试用期并留存</span>
-          <ul className="plain-ol u-mt-8">
-            {hint.factors.map((f, i) => (
-              <li key={i} className="hf-secondary">
-                {f}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </Modal>
-  );
-}
-
 export function OffersPage() {
   const { message, modal } = useAppDialogs();
-  const [retentionFor, setRetentionFor] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
-  const [rejectTarget, setRejectTarget] = useState<Offer | null>(null);
-  const [resubmitTarget, setResubmitTarget] = useState<Offer | null>(null);
   const [declineTarget, setDeclineTarget] = useState<Offer | null>(null);
-  const [rawFilter, setFilter] = useUrlState<'all' | 'approve' | 'reply'>('tab', 'all');
+  const [rawFilter, setFilter] = useUrlState<'all' | 'reply'>('tab', 'all');
   /** 通知 / 待办深链接 ?focus=<offerId>：滚动到该行并高亮，不用在长列表里找 */
   const [params] = useUrlParams();
   const focusId = params.get('focus');
@@ -107,52 +55,22 @@ export function OffersPage() {
       })
       .catch((error) => message.error(extractErrorMessage(error, '操作失败')));
 
-  const copyPortalLink = async (offer: Offer, rotate = false) => {
-    try {
-      const { token } = await offersApi.portalLink(offer.id, rotate);
-      const url = `${window.location.origin}/portal/offer/${token}`;
-      if (rotate) invalidate(); // 时间轴新增一条「重新生成链接」
-      try {
-        await navigator.clipboard.writeText(url);
-        message.success(
-          rotate ? '已重新生成并复制新链接，旧链接已失效' : '候选人链接已复制，请通过邮件/IM 发送给候选人',
-        );
-      } catch {
-        modal.info({
-          title: '候选人链接',
-          content: (
-            <Typography.Text copyable className="u-break-all">
-              {url}
-            </Typography.Text>
-          ),
-        });
-      }
-    } catch (error) {
-      message.error(extractErrorMessage(error, '获取链接失败'));
-    }
-  };
-
-  const canApprove = hasPermission(PERMISSIONS.OFFER_APPROVE);
-  // 「待我审批」只对有审批权的人有意义；HR 从旧链接带着 tab=approve 进来时回落到全部
-  const filter = rawFilter === 'approve' && !canApprove ? 'all' : rawFilter;
+  const copyPortalLink = useCopyPortalLink(invalidate);
+  // 旧链接 tab=approve（审批已下线）回落到全部
+  const filter = rawFilter === 'reply' ? 'reply' : 'all';
   const canInitiate = hasPermission(PERMISSIONS.OFFER_INITIATE);
   const canViewSalary = hasPermission(PERMISSIONS.SALARY_VIEW);
   const canReadCandidate = hasPermission(PERMISSIONS.CANDIDATE_READ);
-  // 审批人在这里拍板，得能直接看到面评与简历，而不是去候选人库里再搜一遍
+  // 发 Offer 前后都要能直接看到面评与简历，而不是去候选人库里再搜一遍
   const [candidateId, openCandidate, closeCandidate] = useDrawerParam('candidate');
 
   const all = offersQuery.data ?? [];
-  /** 分组键：已答复的按 decision 归组，其余按审批状态 */
-  const groupKey = (o: Offer) => (o.decision ? o.decision : o.approvalStatus);
-  const visible = all.filter((o) => {
-    if (filter === 'approve') return o.approvalStatus === 'PENDING';
-    if (filter === 'reply') return o.approvalStatus === 'SENT' && !o.decision;
-    return true;
-  });
+  /** 分组键：已答复的按 decision 归组，其余按状态 */
+  const groupKey = (o: Offer) => (o.decision ? o.decision : o.status);
+  const visible = all.filter((o) => (filter === 'reply' ? o.status === 'SENT' && !o.decision : true));
 
-  const pending = all.filter((o) => o.approvalStatus === 'PENDING').length;
-  const toSend = all.filter((o) => o.approvalStatus === 'APPROVED').length;
-  const toReply = all.filter((o) => o.approvalStatus === 'SENT' && !o.decision).length;
+  const toReply = all.filter((o) => o.status === 'SENT' && !o.decision).length;
+  const expired = all.filter((o) => o.status === 'EXPIRED' && !o.decision).length;
   const accepted = all.filter((o) => o.decision === 'ACCEPTED').length;
   const answered = accepted + all.filter((o) => o.decision === 'DECLINED').length;
   const avgBase =
@@ -160,9 +78,9 @@ export function OffersPage() {
     Math.max(all.filter((o) => o.salary).length, 1);
 
   const kpis = [
-    { label: '待审批', value: pending, unit: '份' },
-    { label: '待发送', value: toSend, unit: '份' },
     { label: '待答复', value: toReply, unit: '份' },
+    { label: '超期未答复', value: expired, unit: '份' },
+    { label: '已接受', value: accepted, unit: '份' },
     { label: '接受率', value: answered ? `${Math.round((accepted / answered) * 100)}%` : '—', unit: '' },
     {
       label: '平均月薪',
@@ -182,7 +100,7 @@ export function OffersPage() {
         </span>
       );
     }
-    if (o.approvalStatus === 'SENT' && o.expiresAt) {
+    if (o.status === 'SENT' && o.expiresAt) {
       const left = Math.max(dayjs(o.expiresAt).diff(dayjs(), 'day'), 0);
       return (
         <span className={left <= 2 ? 'hf-state--err hf-strong' : 'hf-muted'}>
@@ -190,8 +108,8 @@ export function OffersPage() {
         </span>
       );
     }
-    if (o.approvalStatus === 'EXPIRED') return <span className="hf-state--err">超期未答复</span>;
-    if (o.approvalStatus === 'REJECTED') return <span className="hf-muted">{o.approvalNote ?? '已驳回'}</span>;
+    if (o.status === 'EXPIRED') return <span className="hf-state--err">超期未答复</span>;
+    if (o.status === 'DRAFT') return <span className="hf-muted">未发出</span>;
     return <span className="hf-faint">—</span>;
   };
 
@@ -200,8 +118,7 @@ export function OffersPage() {
    * 按「同一门控条件下的动作」分组展开，每个状态判断只写一次，避免同样的条件散在各处漂移。
    */
   const actionCell = (o: Offer) => {
-    const st = o.approvalStatus;
-    const pendingApproval = st === 'PENDING' && canApprove;
+    const st = o.status;
     /** 已发出、还挂在候选人那边（含超期）：链接与续期都归这一组 */
     const outstanding = (st === 'SENT' || st === 'EXPIRED') && canInitiate;
     /** 代录答复仅限 SENT：服务层 applyDecision 对 EXPIRED 直接抛错，放开只会得到点了必然失败的按钮 */
@@ -214,38 +131,24 @@ export function OffersPage() {
     return (
       <RowActions
         actions={[
-          ...(pendingApproval
-            ? [
-                {
-                  key: 'approve',
-                  label: '通过',
-                  hint: '批准该 Offer',
-                  onClick: ask('批准该 Offer？', '批准后可发送给候选人。', () => offersApi.approve(o.id), '已批准'),
-                },
-                { key: 'reject', label: '驳回', hint: '驳回并填写原因', danger: true, pinned: true, onClick: () => setRejectTarget(o) },
-              ]
-            : []),
-          ...(st === 'REJECTED' && canInitiate
-            ? [{ key: 'resubmit', label: '重提', hint: '修改后重新提交审批', onClick: () => setResubmitTarget(o) }]
-            : []),
-          ...(st === 'APPROVED' && canInitiate
+          ...(st === 'DRAFT' && canInitiate
             ? [
                 {
                   key: 'send',
                   label: '发送',
-                  hint: '电子发送 Offer 给候选人',
+                  hint: '发出 Offer，候选人在候选人页答复',
                   onClick: ask(
-                    '电子发送 Offer？',
-                    '将生成候选人免登录链接，答复期 5 个工作日。',
+                    '发送这份 Offer？',
+                    '答复期 5 个工作日；发出后卡片移到「录用」阶段。',
                     () => offersApi.send(o.id),
-                    'Offer 已发送，可复制候选人链接',
+                    'Offer 已发出，可复制候选人页链接',
                   ),
                 },
               ]
             : []),
           ...(outstanding
             ? [
-                { key: 'link', label: '通知', hint: '复制录用通知链接发给候选人', onClick: () => void copyPortalLink(o) },
+                { key: 'link', label: '复制链接', hint: '复制候选人页链接发给候选人', onClick: () => void copyPortalLink(o.application.id) },
                 ...(answerable
                   ? [
                       {
@@ -280,19 +183,17 @@ export function OffersPage() {
                 {
                   key: 'relink',
                   label: '重置链接',
-                  hint: '重新生成候选人链接，旧链接立即失效（误发或疑似泄露时用）',
+                  hint: '重新生成候选人页链接，旧链接立即失效（误发或疑似泄露时用）',
                   onClick: () =>
                     modal.confirm({
-                      title: '重新生成候选人链接？',
+                      title: '重新生成候选人页链接？',
                       content: '旧链接将立即失效，请把新链接重新发给候选人。',
                       cancelText: '取消',
-                      onOk: () => copyPortalLink(o, true),
+                      onOk: () => copyPortalLink(o.application.id, true),
                     }),
                 },
               ]
             : []),
-          // 辅助参考，排在最后 —— 顺序靠后自然会被收进「···」
-          { key: 'retention', label: '预测', hint: 'AI 留存预测（辅助参考）', onClick: () => setRetentionFor(o.id) },
         ]}
       />
     );
@@ -318,7 +219,7 @@ export function OffersPage() {
   }
 
   /** 列宽合计，低于此宽度出现横向滚动而不是把列挤扁 */
-  const OFFER_TABLE_X = 944;
+  const OFFER_TABLE_X = 980;
   /** 首个非空分组才画表头，其余组直接接在下面，避免整页都是表头 */
   const firstGroupKey = GROUPS.find((g) => visible.some((o) => groupKey(o) === g.key))?.key;
 
@@ -397,7 +298,7 @@ export function OffersPage() {
     {
       title: '操作',
       key: 'action',
-      width: 132,
+      width: 168,
       align: 'right',
       fixed: 'right',
       render: (_, o) => actionCell(o),
@@ -416,14 +317,6 @@ export function OffersPage() {
             >
               全部
             </span>
-            {canApprove && (
-              <span
-                className={filter === 'approve' ? 'hf-seg--on' : undefined}
-                {...pressable(() => setFilter('approve'), { role: 'radio', checked: filter === 'approve' })}
-              >
-                待我审批
-              </span>
-            )}
             <span
               className={filter === 'reply' ? 'hf-seg--on' : undefined}
               {...pressable(() => setFilter('reply'), { role: 'radio', checked: filter === 'reply' })}
@@ -432,7 +325,7 @@ export function OffersPage() {
             </span>
           </div>
           <span className="hf-muted">
-            <InfoCircleOutlined /> HR 发起 → 审批 → 发送 → 候选人答复 → <b>自动生成入职单</b>
+            <InfoCircleOutlined /> HR 发送 → 候选人在候选人页答复 → 接受后<b>自动进入入职</b>
           </span>
         </div>
       </div>
@@ -463,15 +356,13 @@ export function OffersPage() {
               <div className="hf-state-title">{filter === 'all' ? '还没有 Offer' : '没有符合条件的 Offer'}</div>
               <div className="hf-state-desc">
                 {canInitiate
-                  ? '在候选人详情里点「发起 Offer」，提交后会进入审批，审批通过才能发送候选人。'
-                  : canApprove
-                    ? 'HR 发起 Offer 后会通知你审批，待审批的会排在最上面。'
-                    : 'HR 发起的 Offer 会显示在这里。'}
+                  ? '在候选人详情里点「发送 Offer」，发出后把候选人页链接发给候选人即可。'
+                  : 'HR 发出的 Offer 会显示在这里。'}
               </div>
             </div>
           </div>
         ) : (
-          /* 按流程阶段分组，待审批排最上；取代分页。
+          /* 按流程阶段分组；取代分页。
              每组一张 Table：只有首个非空组显示表头，各组横滚由 useSyncedTableScroll 串起来 */
           <div ref={groupListRef}>
             {GROUPS.map((g) => {
@@ -494,7 +385,7 @@ export function OffersPage() {
                       showHeader={first}
                       scroll={{ x: OFFER_TABLE_X }}
                       rowClassName={(o) =>
-                        [g.key === 'PENDING' ? 'hf-row--todo' : '', o.id === focusId ? 'hf-row--deeplink' : '']
+                        [g.key === 'DRAFT' ? 'hf-row--todo' : '', o.id === focusId ? 'hf-row--deeplink' : '']
                           .filter(Boolean)
                           .join(' ')
                       }
@@ -506,17 +397,12 @@ export function OffersPage() {
             })}
             <div className="hf-panel-foot hf-panel-foot--tight">
               <span>全部 {all.length} 份 Offer</span>
-              <span className="hf-faint">
-                {OFFER_APPROVAL_STATUS_LABEL['PENDING' as OfferApprovalStatus]}的 Offer 需用人经理处理
-              </span>
+              <span className="hf-faint">接受后自动生成入职单与劳动合同</span>
             </div>
           </div>
         )}
       </div>
 
-      <RetentionModal offerId={retentionFor} onClose={() => setRetentionFor(null)} />
-      <RejectApprovalModal offer={rejectTarget} onClose={() => setRejectTarget(null)} onDone={invalidate} />
-      <ResubmitModal offer={resubmitTarget} onClose={() => setResubmitTarget(null)} onDone={invalidate} />
       <DeclineEntryModal offer={declineTarget} onClose={() => setDeclineTarget(null)} onDone={invalidate} />
       <CandidateDetailDrawer candidateId={candidateId} onClose={closeCandidate} />
     </div>

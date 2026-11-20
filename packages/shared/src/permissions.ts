@@ -21,10 +21,9 @@ export const PERMISSIONS = {
   EVALUATION_READ: 'evaluation:read',
 
   OFFER_INITIATE: 'offer:initiate',
-  OFFER_APPROVE: 'offer:approve',
+  OFFER_READ: 'offer:read',
   SALARY_VIEW: 'salary:view',
 
-  ONBOARDING_UPLOAD: 'onboarding:upload',
   ONBOARDING_READ: 'onboarding:read',
   ONBOARDING_MANAGE: 'onboarding:manage',
 
@@ -51,11 +50,10 @@ export const PERMISSION_DEFS: Array<{ code: PermissionCode; name: string; group:
   { code: PERMISSIONS.EVALUATION_SUBMIT, name: '提交面试评价', group: '面试' },
   { code: PERMISSIONS.EVALUATION_READ, name: '查看面试评价', group: '面试' },
   { code: PERMISSIONS.OFFER_INITIATE, name: '发起 Offer', group: 'Offer' },
-  { code: PERMISSIONS.OFFER_APPROVE, name: '审批 Offer', group: 'Offer' },
+  { code: PERMISSIONS.OFFER_READ, name: '查看 Offer', group: 'Offer' },
   { code: PERMISSIONS.SALARY_VIEW, name: '查看薪资字段', group: 'Offer' },
-  { code: PERMISSIONS.ONBOARDING_UPLOAD, name: '上传入职材料', group: '入职' },
   { code: PERMISSIONS.ONBOARDING_READ, name: '查看入职单', group: '入职' },
-  { code: PERMISSIONS.ONBOARDING_MANAGE, name: '管理入职流程（清单/合同）', group: '入职' },
+  { code: PERMISSIONS.ONBOARDING_MANAGE, name: '管理入职（信息核对 / 确认入职）', group: '入职' },
   { code: PERMISSIONS.DASHBOARD_VIEW, name: '查看数据大盘', group: '全局' },
   { code: PERMISSIONS.USER_MANAGE, name: '用户管理', group: '系统' },
   { code: PERMISSIONS.CONFIG_MANAGE, name: '系统配置', group: '系统' },
@@ -94,7 +92,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
       PERMISSIONS.EVALUATION_READ,
       PERMISSIONS.OFFER_INITIATE,
       PERMISSIONS.SALARY_VIEW,
-      PERMISSIONS.ONBOARDING_UPLOAD,
       PERMISSIONS.ONBOARDING_READ,
       PERMISSIONS.ONBOARDING_MANAGE,
       PERMISSIONS.DASHBOARD_VIEW,
@@ -109,7 +106,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
       PERMISSIONS.APPLICATION_MOVE,
       PERMISSIONS.EVALUATION_SUBMIT,
       PERMISSIONS.EVALUATION_READ,
-      PERMISSIONS.OFFER_APPROVE,
+      PERMISSIONS.OFFER_READ,
       PERMISSIONS.SALARY_VIEW,
       PERMISSIONS.ONBOARDING_READ,
       PERMISSIONS.DASHBOARD_VIEW,
@@ -120,21 +117,5 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<
     dataScope: DataScope.ASSIGNED,
     // evaluation:read 用于「我的面试」列表；行级范围（仅被指派）在查询层收紧
     permissions: [PERMISSIONS.CANDIDATE_READ, PERMISSIONS.EVALUATION_READ, PERMISSIONS.EVALUATION_SUBMIT],
-  },
-  [RoleCode.CANDIDATE]: {
-    name: '候选人',
-    dataScope: DataScope.OWN,
-    permissions: [],
-  },
-  [RoleCode.NEW_HIRE]: {
-    name: '新员工',
-    dataScope: DataScope.OWN,
-    permissions: [PERMISSIONS.ONBOARDING_READ, PERMISSIONS.ONBOARDING_UPLOAD],
-  },
-  [RoleCode.IT_SUPPORT]: {
-    name: 'IT / 行政',
-    dataScope: DataScope.ASSIGNED,
-    // 仅可见入职单并勾选 owner=IT 的待办（勾选范围在服务层按角色约束）
-    permissions: [PERMISSIONS.ONBOARDING_READ],
   },
 };

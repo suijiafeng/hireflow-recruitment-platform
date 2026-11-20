@@ -23,12 +23,11 @@ export class RbacService {
    * 业务约束：
    * - 角色码是权限判定的依据且创建后不可改，因此格式与唯一性都在这里卡死；
    * - 不允许新建 ADMIN——该角色码由 seed 独占并强制全量权限，重名会让权限判定产生歧义；
-   * - 门户角色（CANDIDATE / NEW_HIRE）同理保留，它们不是后台角色；
    * - dataScope 缺省取最小的 ASSIGNED，避免手滑建出一个能看全公司数据的角色。
    */
   async createRole(dto: CreateRoleDto, actor: JwtUser) {
     const code = dto.code.trim().toUpperCase();
-    const reserved: string[] = [RoleCode.ADMIN, RoleCode.CANDIDATE, RoleCode.NEW_HIRE];
+    const reserved: string[] = [RoleCode.ADMIN];
     if (reserved.includes(code)) {
       throw new ForbiddenException(`「${code}」是系统保留角色码，不可新建`);
     }

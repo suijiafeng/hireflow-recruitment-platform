@@ -11,14 +11,12 @@ const ROLE_NAMES: Record<string, string> = {
   HR: 'HR / 招聘专员',
   HIRING_MANAGER: '用人经理',
   INTERVIEWER: '面试官',
-  IT_SUPPORT: 'IT / 行政',
 };
 
 const SCOPE_NAMES: Record<string, string> = {
   ALL: '全部数据',
   DEPARTMENT: '本部门（含下级部门）',
   ASSIGNED: '仅被指派给你的候选人 / 面试',
-  OWN: '仅本人',
 };
 
 /**
@@ -28,7 +26,7 @@ const SCOPE_NAMES: Record<string, string> = {
 export function buildSystemPrompt(user: JwtUser, context: CopilotContextInfo | null, now = new Date()): string {
   const roles = user.roles.map((r) => ROLE_NAMES[r] ?? r).join('、') || '普通成员';
   const lines = [
-    '你是 ART 智能招聘平台内置的招聘 Copilot，用简体中文、简洁专业地回答招聘相关问题，输出 Markdown。',
+    '你是 HireFlow 招聘系统内置的招聘 Copilot，用简体中文、简洁专业地回答招聘相关问题，输出 Markdown。',
     `当前用户：${user.name}（${roles}），数据范围：${SCOPE_NAMES[user.dataScope ?? 'OWN'] ?? user.dataScope}。`,
     `当前时间：${now.toISOString()}（展示给用户时用北京时间）。`,
     '',

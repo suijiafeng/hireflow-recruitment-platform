@@ -18,13 +18,11 @@ enum UserStatus {
 enum DataScope {
   ALL
   DEPARTMENT
-  OWN
   ASSIGNED
 }
 
 enum JobStatus {
   DRAFT
-  PENDING_APPROVAL
   OPEN
   PAUSED
   CLOSED
@@ -50,11 +48,18 @@ enum InterviewStatus {
   CANCELED
 }
 
-enum OfferApprovalStatus {
-  DRAFT
-  PENDING
-  APPROVED
-  REJECTED
+/// 阶段类型：自动流转按类型定位阶段，阶段名可以随意改。四个系统阶段每个职位各一个、不可删除
+enum StageKind {
+  SCREENING // 筛选
+  INTERVIEW // 面试（多轮面试是卡片上的轮次标签，不再拆列）
+  OFFER // 录用
+  ONBOARDING // 入职（接受 Offer 后进入；入职完成后状态为 HIRED，仍留在本列）
+  CUSTOM // 职位自定义的普通阶段
+}
+
+/// Offer 由 HR 直接发出，不再经过审批；候选人答复记在 decision
+enum OfferStatus {
+  DRAFT // 迁移前尚未发出的 Offer，HR 确认后发送
   SENT
   EXPIRED // 到期未答复自动失效，可续期一次回到 SENT
 }
@@ -70,11 +75,10 @@ enum OnboardingStatus {
   COMPLETED
 }
 
+/// 合同：接受 Offer 后自动生成，新员工在候选人页阅读并确认（输入姓名确认，记录时间）
 enum ContractSignStatus {
-  DRAFT
-  SENT
+  PENDING
   SIGNED
-  ARCHIVED
 }
 
 enum EvaluationConclusion {
@@ -173,6 +177,8 @@ model Job {
   scorecardTemplate Json? // 岗位级评分卡模板 [{dimension, weight}]（空则用全局默认）
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
+
+  @@index([departmentId, status])
 }
 
 // 每个职位可自定义的招聘阶段（Pipeline Builder）
@@ -181,6 +187,7 @@ model PipelineStage {
   jobId        String
   job          Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
   name         String
+  kind         StageKind     @default(CUSTOM)
   order        Int
   applications Application[]
 
@@ -199,20 +206,25 @@ model Candidate {
   applications Application[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+
+  @@index([email])
+  @@index([phone])
 }
 
 model Resume {
   id             String            @id @default(cuid())
   candidateId    String
   candidate      Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  fileKey        String? // 对象存储 key（文件上传后续接入）
+  fileKey        String? // 原件在对象存储中的 key
   fileName       String?
   rawText        String?
-  parsed         Json? // AI 解析后的结构化 JSON（二期）
+  parsed         Json? // AI 解析出的结构化字段
   skills         String[]
   parseStatus    ResumeParseStatus @default(PENDING)
   parseStartedAt DateTime? // 最近一次进入 PARSING 的时间：并发去重 + 进程中途挂掉后可超时重试
   createdAt      DateTime          @default(now())
+
+  @@index([candidateId])
 }
 
 // 应聘记录：连接 Candidate 与 Job，驱动 Pipeline
@@ -225,16 +237,16 @@ model Application {
   stageId            String
   stage              PipelineStage     @relation(fields: [stageId], references: [id])
   status             ApplicationStatus @default(ACTIVE)
-  matchScore         Int? // AI 匹配度分数（二期）
-  matchReport        Json? // 打分依据（二期）
+  matchScore         Int? // AI 匹配度分数
+  matchReport        Json? // 打分依据
   matchSource        String? // 分数口径：ai = 大模型评分；rule = 规则引擎（未配模型或降级），列表/看板据此标注
   position           Float             @default(0) // 看板列内排序
   stageEnteredAt     DateTime          @default(now()) // 进入当前阶段时间（停留时长/SLA）
   version            Int               @default(0) // 乐观锁：并发拖卡冲突检测
   rejectReason       String? // 淘汰/撤回原因码（原因码强制）
-  prescreen          Json? // AI 预筛问答（薪资/到岗/出差 + 提交时间 + 硬性条件核验结果）
-  prescreenToken     String?           @unique // 预筛免登录 H5 令牌
-  prescreenExpiresAt DateTime? // 预筛链接硬过期时间（过期后打开显示「链接已过期」，重新发送会换新令牌）
+  /// 候选人页令牌：一条应聘一个链接，选面试时间、答复 Offer、填写入职信息都在同一页
+  portalToken        String?           @unique
+  portalExpiresAt    DateTime? // 链接硬过期时间，每进入新的环节顺延
   interviews         Interview[]
   offer              Offer?
   onboarding         Onboarding?
@@ -255,12 +267,11 @@ model Interview {
   location        String?
   meetingUrl      String?
   status          InterviewStatus        @default(SCHEDULED)
-  transcript      Json? // 面试 Copilot 转写（二期）
-  portalToken     String?                @unique // 候选人自助选时 H5 令牌
-  portalExpiresAt DateTime? // 选时链接硬过期时间
   interviewers    InterviewInterviewer[]
   evaluations     Evaluation[]
   createdAt       DateTime               @default(now())
+
+  @@index([applicationId])
 }
 
 // 面试官可约时段（无外部日历集成时的系统内空闲档）
@@ -328,11 +339,11 @@ model Evaluation {
   scorecard     Json? // 结构化评分卡：[{dimension, score, comment}]
   conclusion    EvaluationConclusion?
   comments      String?
-  aiDraft       Json? // AI 生成的面评草稿（二期）
   submittedAt   DateTime?
   createdAt     DateTime              @default(now())
 
   @@unique([interviewId, interviewerId])
+  @@index([interviewerId])
 }
 
 model Offer {
@@ -341,14 +352,11 @@ model Offer {
   application     Application         @relation(fields: [applicationId], references: [id])
   salary          Json? // 敏感字段：薪资结构（RBAC salary:view 控制）
   grade           String?
-  startDate       DateTime?           @db.Date // 预计入职日期（随 Offer 审批，进合同与门户）
-  approvalStatus  OfferApprovalStatus @default(DRAFT)
-  approvalNote    String? // 审批意见（驳回带意见退回 HR 修改重提）
+  startDate       DateTime?           @db.Date // 预计入职日期（进合同与候选人页）
+  status          OfferStatus         @default(SENT)
   sentAt          DateTime?
   expiresAt       DateTime? // 答复截止（发送时 +5 个工作日）
   extendedOnce    Boolean             @default(false) // 有效期仅可续期一次
-  portalToken     String?             @unique // 候选人免登录 H5 令牌
-  portalExpiresAt DateTime? // 门户链接硬过期时间（晚于答复截止 expiresAt，答复后再留一段查看期）
   respondedAt     DateTime?
   decision        OfferDecision?
   decisionReason  String? // 候选人拒绝原因码
@@ -360,12 +368,11 @@ model Onboarding {
   id              String           @id @default(cuid())
   applicationId   String           @unique
   application     Application      @relation(fields: [applicationId], references: [id])
-  checklist       Json? // 三方待办清单（HR/IT/新员工）
-  documents       Json? // 已收集材料
-  ocrResults      Json? // OCR 识别结果
+  /// 新员工在候选人页填写的入职信息（证件号、银行卡、紧急联系人等），HR 以外只看尾号
+  info            Json?
+  infoSubmittedAt DateTime?
   status          OnboardingStatus @default(NOT_STARTED)
-  portalToken     String?          @unique // 新员工免登录 H5 令牌
-  portalExpiresAt DateTime? // 新员工门户硬过期时间
+  completedAt     DateTime?
   contract        Contract?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
@@ -377,14 +384,14 @@ model Contract {
   onboarding   Onboarding         @relation(fields: [onboardingId], references: [id])
   templateName String?
   variables    Json? // 模板变量填充值
-  signStatus   ContractSignStatus @default(DRAFT)
-  evidenceNo   String? // 电子签存证号
-  fileKey      String?
+  signStatus   ContractSignStatus @default(PENDING)
+  signedAt     DateTime?
+  signerName   String? // 新员工确认时输入的姓名
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
 }
 
-// 公司制度文档（HR Helpdesk 的知识库来源）
+// 公司制度文档：候选人页入职问答与 Copilot「查制度」的知识库
 model CompanyDoc {
   id        String   @id @default(cuid())
   title     String
@@ -394,7 +401,7 @@ model CompanyDoc {
   updatedAt DateTime @updatedAt
 }
 
-// 站内通知（通知矩阵的站内信渠道；邮件/IM 通道后续接入）
+// 站内通知
 model Notification {
   id        String   @id @default(cuid())
   userId    String
@@ -406,6 +413,7 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, read])
+  @@index([userId, createdAt])
 }
 
 // 全流程操作日志：360° 时间轴 + 合规审计
@@ -421,6 +429,9 @@ model ActivityLog {
   createdAt  DateTime @default(now())
 
   @@index([entityType, entityId])
+  @@index([entityId])
+  @@index([createdAt])
+  @@index([action, createdAt])
 }
 
 enum CopilotActionStatus {
