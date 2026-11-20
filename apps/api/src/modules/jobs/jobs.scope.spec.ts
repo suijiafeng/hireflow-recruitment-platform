@@ -189,7 +189,7 @@ describe('职位与应聘数据范围及对比参数回归', () => {
 
   it('职位列表汇总按范围内全部职位计算，分页和状态页签不会把它缩小', async () => {
     await prisma.job.update({ where: { id: 'local' }, data: { status: 'OPEN', headcount: 3 } });
-    await prisma.job.update({ where: { id: 'child' }, data: { status: 'PENDING_APPROVAL', headcount: 2 } });
+    await prisma.job.update({ where: { id: 'child' }, data: { status: 'DRAFT', headcount: 2 } });
     await prisma.job.update({ where: { id: 'foreign' }, data: { status: 'OPEN', headcount: 9 } });
     await prisma.application.update({ where: { id: 'application-root' }, data: { status: 'HIRED' } });
 
@@ -199,7 +199,7 @@ describe('职位与应聘数据范围及对比参数回归', () => {
     expect(page.items).toHaveLength(1);
     expect(page.summary).toEqual({
       open: 1,
-      pendingApproval: 1,
+      draft: 1,
       headcount: 5,
       hcUsed: 1,
       inFlow: 3,
@@ -212,7 +212,7 @@ describe('职位与应聘数据范围及对比参数回归', () => {
 
     const childOnly = await get('/jobs?departmentId=dept-child');
     expect(childOnly.total).toBe(1);
-    expect(childOnly.summary).toMatchObject({ open: 0, pendingApproval: 1, headcount: 2, hcUsed: 0, inFlow: 1 });
+    expect(childOnly.summary).toMatchObject({ open: 0, draft: 1, headcount: 2, hcUsed: 0, inFlow: 1 });
 
     const outside = await get('/jobs?departmentId=dept-other');
     expect(outside.total).toBe(0);
@@ -346,37 +346,27 @@ describe('职位与应聘数据范围及对比参数回归', () => {
     expect((await (await request('/jobs/local/talent-pool/scan')).json()).scanned).toBe(4);
   });
 
+  // 候选人对比只剩 Copilot 工具一个入口（compare_candidates），参数校验由服务层兜底
   it.each([
-    ['缺少 ids', {}],
-    ['字符串', { ids: 'ab' }],
-    ['数字', { ids: 12 }],
-    ['对象', { ids: {} }],
-    ['null', { ids: null }],
-    ['非字符串元素', { ids: [1, 2] }],
-    ['空白元素', { ids: [' ', 'b'] }],
-    ['数量不足', { ids: ['a'] }],
-    ['数量超限', { ids: ['a', 'b', 'c', 'd', 'e'] }],
-    ['重复元素', { ids: ['a', 'a'] }],
-  ])('对比拒绝%s并返回 400，不调用 AI', async (_label, body) => {
-    const response = await request('/applications/compare', body);
-    expect(response.status).toBe(400);
-    expect((await response.json()).message.length).toBeGreaterThan(0);
+    ['缺少 ids', undefined],
+    ['字符串', 'ab'],
+    ['数字', 12],
+    ['对象', {}],
+    ['null', null],
+    ['非字符串元素', [1, 2]],
+    ['空白元素', [' ', 'b']],
+    ['数量不足', ['a']],
+    ['数量超限', ['a', 'b', 'c', 'd', 'e']],
+    ['重复元素', ['a', 'a']],
+  ])('对比拒绝%s并返回参数异常，不调用 AI', async (_label, ids) => {
+    await expect(applications.compare(ids as never, currentUser)).rejects.toBeInstanceOf(BadRequestException);
     expect(ai.compareCandidates).not.toHaveBeenCalled();
     expect(await prisma.activityLog.count()).toBe(0);
   });
 
-  it('合法同职位对比正常返回；服务层直接收到错误类型也返回参数异常', async () => {
-    const response = await request('/applications/compare', {
-      ids: ['application-root', 'application-peer'],
-    });
-    expect(response.status).toBe(201);
-    expect((await response.json()).candidates).toHaveLength(2);
+  it('合法同职位对比正常返回', async () => {
+    const result = await applications.compare(['application-root', 'application-peer'], currentUser);
+    expect(result.candidates).toHaveLength(2);
     expect(ai.compareCandidates).toHaveBeenCalledTimes(1);
-    await expect(applications.compare({} as never, currentUser)).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
-    await expect(applications.compare([1, 2] as never, currentUser)).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
   });
 });

@@ -9,7 +9,6 @@ import {
   JD_SCHEMA,
   MATCH_SCHEMA,
   PARSED_RESUME_SCHEMA,
-  RETENTION_SCHEMA,
 } from '../prompts.schemas';
 import {
   INSTRUCTION_HIERARCHY,
@@ -33,8 +32,6 @@ import type {
   MatchInput,
   MatchResult,
   ParsedResume,
-  RetentionHint,
-  RetentionInput,
 } from './ai-engine.interface';
 
 export interface PromptSpec {
@@ -254,40 +251,6 @@ export abstract class LlmEngine implements AiEngine {
       ),
     );
     return answer;
-  }
-
-  async predictRetention(input: RetentionInput): Promise<RetentionHint> {
-    const result = await this.completeJson<RetentionHint>(
-      this.spec(
-        'predictRetention',
-        [
-          '你是招聘数据分析师。基于候选人画像估计其入职后通过试用期并留存的概率（0-1）。',
-          '这只是辅助参考：概率保持保守（0.5-0.95 区间），并给出 2-4 条可解释的影响因素。',
-          '最后一条因素固定为提醒：仅作辅助参考，录用决策以人工判断为准。',
-        ],
-        [
-          `目标职位：${input.jobTitle}`,
-          input.matchScore != null ? `岗位匹配度：${input.matchScore}/100` : '',
-          wrapUntrusted(
-            'candidate_profile',
-            [
-              `候选人：${input.candidateName}`,
-              `技能标签：${input.tags.join('、') || '（无）'}`,
-              input.summary ? `画像摘要：${input.summary}` : '',
-            ]
-              .filter(Boolean)
-              .join('\n'),
-            3_000,
-          ),
-        ]
-          .filter(Boolean)
-          .join('\n'),
-        RETENTION_SCHEMA,
-        2048,
-      ),
-    );
-    result.probability = Math.max(0, Math.min(1, Number(result.probability) || 0));
-    return result;
   }
 
   async funnelInsight(input: FunnelInput): Promise<string> {

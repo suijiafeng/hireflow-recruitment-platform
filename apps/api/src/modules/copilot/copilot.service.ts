@@ -67,7 +67,7 @@ function suggestionsFor(user: JwtUser): string[] {
   if (has(PERMISSIONS.EVALUATION_READ)) list.push('未来一周我有哪些面试？');
   if (has(PERMISSIONS.CANDIDATE_READ)) list.push('帮我找一下熟悉 React 的候选人');
   if (has(PERMISSIONS.DASHBOARD_VIEW)) list.push('当前招聘漏斗哪个环节转化最低？');
-  if (has(PERMISSIONS.OFFER_INITIATE) || has(PERMISSIONS.OFFER_APPROVE)) list.push('有哪些 Offer 还在审批中？');
+  if (has(PERMISSIONS.OFFER_INITIATE) || has(PERMISSIONS.OFFER_READ)) list.push('有哪些 Offer 还没有答复？');
   if (has(PERMISSIONS.JOB_READ)) list.push('现在有哪些在招职位？');
   list.push('我今天有哪些待办？');
   return list.slice(0, 4);

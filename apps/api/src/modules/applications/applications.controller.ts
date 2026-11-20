@@ -3,10 +3,9 @@ import { Body, Controller, Get, HttpCode, Param, Patch, Post } from '@nestjs/com
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PERMISSIONS } from '@hireflow/shared';
 import { CurrentUser, type JwtUser } from '../../common/decorators/current-user.decorator';
-import { RequirePermissions } from '../../common/decorators/permissions.decorator';
+import { RequireAnyPermission, RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { ApplicationsService } from './applications.service';
 import { CreateApplicationDto } from './dto/create-application.dto';
-import { CompareApplicationsDto } from './dto/compare-applications.dto';
 import { BatchMoveDto, BatchRejectDto, MoveStageDto, RejectApplicationDto } from './dto/move-stage.dto';
 import { AiRateLimit } from '../../common/guards/ai-throttle.guard';
 
@@ -45,19 +44,11 @@ export class ApplicationsController {
     return this.applicationsService.score(id, user);
   }
 
-  @Post('applications/compare')
-  @AiRateLimit()
-  @RequirePermissions(PERMISSIONS.CANDIDATE_READ)
-  @ApiOperation({ summary: '候选人对比（2-4 人并排 + AI 综合意见，同职位内）' })
-  compare(@Body() body: CompareApplicationsDto, @CurrentUser() user: JwtUser) {
-    return this.applicationsService.compare(body.ids, user);
-  }
-
-  @Post('applications/:id/prescreen-link')
-  @RequirePermissions(PERMISSIONS.APPLICATION_MOVE)
-  @ApiOperation({ summary: '生成候选人预筛链接（邀约前核实薪资/到岗/出差）' })
-  sendPrescreen(@Param('id') id: string, @Body() dto: PortalLinkDto, @CurrentUser() user: JwtUser) {
-    return this.applicationsService.sendPrescreen(id, user, dto?.rotate === true);
+  @Post('applications/:id/portal-link')
+  @RequireAnyPermission(PERMISSIONS.INTERVIEW_SCHEDULE, PERMISSIONS.OFFER_INITIATE, PERMISSIONS.ONBOARDING_MANAGE)
+  @ApiOperation({ summary: '获取候选人页链接（选面试时间 / 答复 Offer / 填写入职信息共用一个链接；rotate 让旧链接失效）' })
+  portalLink(@Param('id') id: string, @Body() dto: PortalLinkDto, @CurrentUser() user: JwtUser) {
+    return this.applicationsService.portalLink(id, user, dto?.rotate === true);
   }
 
   // 批量路由必须声明在 :id 参数路由之前（Nest 按声明顺序匹配，否则 "batch" 会被当作 :id）

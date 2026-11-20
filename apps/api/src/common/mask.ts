@@ -57,3 +57,8 @@ export function maskContactsDeep<T>(value: T): T {
   }
   return value;
 }
+
+/** 证件号 / 卡号 / 地址这类长字段：只留后 4 位 */
+export function maskTail(value: string): string {
+  return value.length > 4 ? `${STARS}${value.slice(-4)}` : STARS;
+}

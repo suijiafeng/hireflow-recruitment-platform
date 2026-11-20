@@ -8,15 +8,11 @@ export enum RoleCode {
   HR = 'HR',
   HIRING_MANAGER = 'HIRING_MANAGER',
   INTERVIEWER = 'INTERVIEWER',
-  CANDIDATE = 'CANDIDATE',
-  NEW_HIRE = 'NEW_HIRE',
-  IT_SUPPORT = 'IT_SUPPORT',
 }
 
 export enum DataScope {
   ALL = 'ALL',
   DEPARTMENT = 'DEPARTMENT',
-  OWN = 'OWN',
   ASSIGNED = 'ASSIGNED',
 }
 
@@ -27,7 +23,6 @@ export enum UserStatus {
 
 export enum JobStatus {
   DRAFT = 'DRAFT',
-  PENDING_APPROVAL = 'PENDING_APPROVAL',
   OPEN = 'OPEN',
   PAUSED = 'PAUSED',
   CLOSED = 'CLOSED',
@@ -60,11 +55,19 @@ export enum EvaluationConclusion {
   STRONG_NO = 'STRONG_NO',
 }
 
-export enum OfferApprovalStatus {
+/** 阶段类型：自动流转按类型定位阶段，阶段可以改名 */
+export enum StageKind {
+  SCREENING = 'SCREENING',
+  INTERVIEW = 'INTERVIEW',
+  OFFER = 'OFFER',
+  ONBOARDING = 'ONBOARDING',
+  CUSTOM = 'CUSTOM',
+}
+
+/** Offer 由 HR 直接发出，不经审批；候选人答复记在 OfferDecision */
+export enum OfferStatus {
+  /** 迁移前未发出的 Offer，HR 确认后发送 */
   DRAFT = 'DRAFT',
-  PENDING = 'PENDING',
-  APPROVED = 'APPROVED',
-  REJECTED = 'REJECTED',
   SENT = 'SENT',
   /** 到期未答复自动失效，可续期一次回到 SENT */
   EXPIRED = 'EXPIRED',
@@ -82,15 +85,12 @@ export enum OnboardingStatus {
 }
 
 export enum ContractSignStatus {
-  DRAFT = 'DRAFT',
-  SENT = 'SENT',
+  PENDING = 'PENDING',
   SIGNED = 'SIGNED',
-  ARCHIVED = 'ARCHIVED',
 }
 
 export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
   [JobStatus.DRAFT]: '草稿',
-  [JobStatus.PENDING_APPROVAL]: '待审批',
   [JobStatus.OPEN]: '招聘中',
   [JobStatus.PAUSED]: '已暂停',
   [JobStatus.CLOSED]: '已关闭',
@@ -116,13 +116,19 @@ export const INTERVIEW_STATUS_LABEL: Record<InterviewStatus, string> = {
   [InterviewStatus.CANCELED]: '已取消',
 };
 
-export const OFFER_APPROVAL_STATUS_LABEL: Record<OfferApprovalStatus, string> = {
-  [OfferApprovalStatus.DRAFT]: '草稿',
-  [OfferApprovalStatus.PENDING]: '待审批',
-  [OfferApprovalStatus.APPROVED]: '已批准',
-  [OfferApprovalStatus.REJECTED]: '已驳回',
-  [OfferApprovalStatus.SENT]: '已发送',
-  [OfferApprovalStatus.EXPIRED]: '已失效',
+export const OFFER_STATUS_LABEL: Record<OfferStatus, string> = {
+  [OfferStatus.DRAFT]: '待发送',
+  [OfferStatus.SENT]: '已发送',
+  [OfferStatus.EXPIRED]: '已失效',
+};
+
+/** 四个系统阶段的默认名（可以改名，不能删除）；CUSTOM 是职位自己加的阶段 */
+export const STAGE_KIND_LABEL: Record<StageKind, string> = {
+  [StageKind.SCREENING]: '筛选',
+  [StageKind.INTERVIEW]: '面试',
+  [StageKind.OFFER]: '录用',
+  [StageKind.ONBOARDING]: '入职',
+  [StageKind.CUSTOM]: '自定义',
 };
 
 export const OFFER_DECISION_LABEL: Record<OfferDecision, string> = {
@@ -137,10 +143,8 @@ export const ONBOARDING_STATUS_LABEL: Record<OnboardingStatus, string> = {
 };
 
 export const CONTRACT_SIGN_STATUS_LABEL: Record<ContractSignStatus, string> = {
-  [ContractSignStatus.DRAFT]: '草稿',
-  [ContractSignStatus.SENT]: '待签署',
-  [ContractSignStatus.SIGNED]: '已签署',
-  [ContractSignStatus.ARCHIVED]: '已归档',
+  [ContractSignStatus.PENDING]: '待确认',
+  [ContractSignStatus.SIGNED]: '已确认',
 };
 
 export const ROLE_LABEL: Record<RoleCode, string> = {
@@ -148,7 +152,4 @@ export const ROLE_LABEL: Record<RoleCode, string> = {
   [RoleCode.HR]: 'HR / 招聘专员',
   [RoleCode.HIRING_MANAGER]: '用人经理',
   [RoleCode.INTERVIEWER]: '面试官',
-  [RoleCode.CANDIDATE]: '候选人',
-  [RoleCode.NEW_HIRE]: '新员工',
-  [RoleCode.IT_SUPPORT]: 'IT / 行政',
 };

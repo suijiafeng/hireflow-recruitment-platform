@@ -1,12 +1,34 @@
-/** 新建职位时的默认 Pipeline 阶段（可在职位维度自定义） */
+import { StageKind } from './enums';
+
+/**
+ * 新建职位时的默认阶段：四个系统阶段，自动流转按 kind 定位，名字可以改。
+ * 多轮面试不再拆成「一面 / 二面」两列，轮次显示在卡片上。
+ */
 export const DEFAULT_PIPELINE_STAGES = [
-  '简历初筛',
-  '一面',
-  '二面',
-  'Offer',
-  '待入职',
-  '已入职',
+  { name: '筛选', kind: StageKind.SCREENING },
+  { name: '面试', kind: StageKind.INTERVIEW },
+  { name: '录用', kind: StageKind.OFFER },
+  { name: '入职', kind: StageKind.ONBOARDING },
 ] as const;
+
+/** 系统阶段的固定先后顺序（自定义阶段可以插在它们之间） */
+export const SYSTEM_STAGE_KINDS = [StageKind.SCREENING, StageKind.INTERVIEW, StageKind.OFFER, StageKind.ONBOARDING] as const;
+
+/** 简化前的阶段名 → 阶段类型：旧的流转日志（payload.to / from 只有阶段名）按这个归并到新的四个阶段 */
+export const LEGACY_STAGE_KIND: Record<string, StageKind> = {
+  简历初筛: StageKind.SCREENING,
+  一面: StageKind.INTERVIEW,
+  二面: StageKind.INTERVIEW,
+  Offer: StageKind.OFFER,
+  待入职: StageKind.ONBOARDING,
+  已入职: StageKind.ONBOARDING,
+};
+
+/** 面试轮次的中文叫法：1 → 一面 */
+export function roundLabel(round: number): string {
+  const n = ['', '一', '二', '三', '四', '五', '六'][round];
+  return n ? `${n}面` : `第 ${round} 轮`;
+}
 
 /** ActivityLog.action 取值约定：<实体>.<动作> */
 export const ACTIVITY_ACTIONS = {
@@ -31,25 +53,18 @@ export const ACTIVITY_ACTIONS = {
   INTERVIEW_CANCELED: 'interview.canceled',
   EVALUATION_SUBMITTED: 'evaluation.submitted',
   OFFER_INITIATED: 'offer.initiated',
-  OFFER_APPROVED: 'offer.approved',
-  OFFER_REJECTED: 'offer.rejected',
   OFFER_SENT: 'offer.sent',
   OFFER_RESPONDED: 'offer.responded',
-  OFFER_RESUBMITTED: 'offer.resubmitted',
   OFFER_EXTENDED: 'offer.extended',
   OFFER_EXPIRED: 'offer.expired',
   PORTAL_LINK_ROTATED: 'portal.link_rotated',
   PORTAL_LINK_REVOKED: 'portal.link_revoked',
   APPLICATION_WITHDRAWN: 'application.withdrawn',
   CANDIDATES_COMPARED: 'application.candidates_compared',
-  PRESCREEN_SENT: 'application.prescreen_sent',
-  PRESCREEN_SUBMITTED: 'application.prescreen_submitted',
   ONBOARDING_CREATED: 'onboarding.created',
-  ONBOARDING_ITEM_DONE: 'onboarding.item_done',
   ONBOARDING_COMPLETED: 'onboarding.completed',
-  DOCUMENT_ADDED: 'onboarding.document_added',
+  ONBOARDING_INFO_SUBMITTED: 'onboarding.info_submitted',
   CONTRACT_CREATED: 'contract.created',
-  CONTRACT_SENT: 'contract.sent',
   CONTRACT_SIGNED: 'contract.signed',
   WEBHOOK_FIRED: 'webhook.fired',
   APPLICATION_REJECTED: 'application.rejected',
@@ -71,41 +86,17 @@ export const ACTIVITY_ACTIONS = {
   COPILOT_ACTION_FAILED: 'copilot.action_failed',
 } as const;
 
-/** 入职三方待办清单默认模板，owner: HR / IT / NEW_HIRE */
-export const DEFAULT_ONBOARDING_CHECKLIST = [
-  { key: 'hr_profile', label: '建立员工档案', owner: 'HR' },
-  { key: 'hr_workspace', label: '安排工位与门禁', owner: 'HR' },
-  { key: 'it_computer', label: '准备电脑设备', owner: 'IT' },
-  { key: 'it_email', label: '开通企业邮箱', owner: 'IT' },
-  { key: 'it_im', label: '开通内部 IM 账号', owner: 'IT' },
-  { key: 'nh_id_card', label: '上传身份证', owner: 'NEW_HIRE' },
-  { key: 'nh_bank_card', label: '上传银行卡', owner: 'NEW_HIRE' },
-  { key: 'nh_diploma', label: '上传学历证书', owner: 'NEW_HIRE' },
-  { key: 'nh_contract', label: '签署劳动合同', owner: 'NEW_HIRE' },
+/** 新员工在候选人页填写的入职信息字段（证件号、卡号对 HR 以外的角色只显示尾号） */
+export const ONBOARDING_INFO_FIELDS = [
+  { key: 'idNumber', label: '身份证号', sensitive: true },
+  { key: 'bankName', label: '开户银行', sensitive: false },
+  { key: 'bankAccount', label: '工资卡号', sensitive: true },
+  { key: 'address', label: '现居住地址', sensitive: true },
+  { key: 'emergencyContact', label: '紧急联系人', sensitive: false },
+  { key: 'emergencyPhone', label: '紧急联系人电话', sensitive: true },
 ] as const;
 
-/** 入职材料类型 → 自动勾选的清单项 */
-export const DOCUMENT_TYPE_META = {
-  ID_CARD: { label: '身份证', checklistKey: 'nh_id_card' },
-  BANK_CARD: { label: '银行卡', checklistKey: 'nh_bank_card' },
-  DIPLOMA: { label: '学历证书', checklistKey: 'nh_diploma' },
-} as const;
-
-export type DocumentType = keyof typeof DOCUMENT_TYPE_META;
-
-/** OCR 识别字段的中文名（识别结果对新员工和 HR 展示，不能直接露英文键） */
-export const DOCUMENT_FIELD_LABEL: Record<string, string> = {
-  name: '姓名',
-  idNumber: '身份证号',
-  address: '住址',
-  birth: '出生日期',
-  cardNumber: '卡号',
-  bank: '开户银行',
-  school: '毕业院校',
-  degree: '学历',
-  major: '专业',
-  graduation: '毕业年份',
-};
+export type OnboardingInfoKey = (typeof ONBOARDING_INFO_FIELDS)[number]['key'];
 
 /** Offer 答复有效期（工作日）：到期失效、可续期一次 */
 export const OFFER_VALID_BUSINESS_DAYS = 5;
@@ -120,7 +111,6 @@ export const OFFER_DECLINE_REASONS = [
   '其他',
 ] as const;
 
-/** 阶段停留 SLA（天）：超过 warn 标黄、超过 danger 标红（后续做成可配置） */
 /** 全局默认评分卡模板：评分卡按岗位模板配置；Job.scorecardTemplate 为空时使用 */
 export const DEFAULT_SCORECARD_TEMPLATE = [
   { dimension: '技术能力', weight: 40 },
@@ -128,6 +118,7 @@ export const DEFAULT_SCORECARD_TEMPLATE = [
   { dimension: '沟通协作', weight: 30 },
 ] as const;
 
+/** 阶段停留 SLA（天）：超过 warn 标黄、超过 danger 标红 */
 export const STAGE_STAY_SLA = { warnDays: 3, dangerDays: 7 } as const;
 
 /** 淘汰/撤回原因码（原因码强制，供漏斗分析与人才库回流） */

@@ -1,10 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PERMISSIONS, RoleCode } from '@hireflow/shared';
+import { PERMISSIONS } from '@hireflow/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
- * 站内通知（通知矩阵的站内信渠道）。
- * 推送失败不抛错、不阻断主流程；邮件/IM 渠道后续在此扩展。
+ * 站内通知（内部成员的铃铛）。推送失败不抛错、不阻断主流程。
  */
 @Injectable()
 export class NotificationsService {
@@ -25,28 +24,10 @@ export class NotificationsService {
     }
   }
 
-  /** 按角色推送（如：通知所有 HR）。业务状态多在此调用前已落库，查询失败同样不阻断主流程 */
-  async pushToRole(role: RoleCode, title: string, body?: string, link?: string) {
-    try {
-      const users = await this.prisma.user.findMany({
-        where: { status: 'ACTIVE', roles: { some: { role: { code: role } } } },
-        select: { id: true },
-      });
-      await this.push(
-        users.map((u) => u.id),
-        title,
-        body,
-        link,
-      );
-    } catch (error) {
-      this.logger.warn(`按角色推送失败（${role}）：${error instanceof Error ? error.message : error}`);
-    }
-  }
-
   /**
-   * 职位的「负责人」——审批 Offer、接收满编/入职等职位级通知的人：
+   * 职位的「负责人」——接收 Offer、满编、入职等职位级通知的人：
    * 1. 职位指定了用人经理 → 只发给他；
-   * 2. 未指定 → 本部门及上级部门里有「审批 Offer」权限的在职成员（技术部总监能审前端组的 Offer）；
+   * 2. 未指定 → 本部门及上级部门里有「查看 Offer」权限的在职成员（技术部总监也能看到前端组的 Offer）；
    * 3. 仍无人 → 有该权限且数据范围为全局的成员（管理员），保证不会无人知晓。
    */
   async jobManagerIds(jobId: string): Promise<string[]> {
@@ -63,7 +44,7 @@ export class NotificationsService {
       }
 
       const chain = await this.departmentChain(row.departmentId);
-      const approve = { permissions: { some: { permission: { code: PERMISSIONS.OFFER_APPROVE } } } };
+      const approve = { permissions: { some: { permission: { code: PERMISSIONS.OFFER_READ } } } };
       const inDept = await this.prisma.user.findMany({
         where: { status: 'ACTIVE', departmentId: { in: chain }, roles: { some: { role: approve } } },
         select: { id: true },
@@ -96,7 +77,7 @@ export class NotificationsService {
    * 范围按角色的数据范围收口：
    * - ALL：全部收到；
    * - DEPARTMENT：只有职位所在部门（或其上级部门）的成员收到；
-   * - ASSIGNED / OWN：不是「负责一类事」的角色，不按权限广播（他们的通知走指派 / 职位负责人）。
+   * - ASSIGNED：不是「负责一类事」的角色，不按权限广播（他们的通知走指派 / 职位负责人）。
    */
   async recipientsByPermission(permission: string, departmentId: string | null): Promise<string[]> {
     try {

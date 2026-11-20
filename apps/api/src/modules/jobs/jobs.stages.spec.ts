@@ -248,4 +248,50 @@ describe('职位阶段 HTTP / 数据库联调', () => {
       );
     }
   });
+
+  describe('系统阶段（筛选 / 面试 / 录用 / 入职）', () => {
+    beforeEach(async () => {
+      await prisma.pipelineStage.deleteMany({ where: { jobId: 'j1' } });
+      await prisma.pipelineStage.createMany({
+        data: [
+          { id: 'k1', jobId: 'j1', name: '筛选', kind: 'SCREENING', order: 0 },
+          { id: 'k2', jobId: 'j1', name: '面试', kind: 'INTERVIEW', order: 1 },
+          { id: 'k3', jobId: 'j1', name: '录用', kind: 'OFFER', order: 2 },
+          { id: 'k4', jobId: 'j1', name: '入职', kind: 'ONBOARDING', order: 3 },
+        ],
+      });
+    });
+    const all = [
+      { id: 'k1', name: '筛选' },
+      { id: 'k2', name: '面试' },
+      { id: 'k3', name: '录用' },
+      { id: 'k4', name: '入职' },
+    ];
+
+    it('可以改名、可以在中间插入自定义阶段，类型保持不变', async () => {
+      const res = await put([all[0], { name: '笔试' }, { id: 'k2', name: '技术面' }, all[2], all[3]]);
+      expect(res.status).toBe(200);
+      const rows = await read();
+      expect(rows.map((r) => [r.name, r.kind])).toEqual([
+        ['筛选', 'SCREENING'],
+        ['笔试', 'CUSTOM'],
+        ['技术面', 'INTERVIEW'],
+        ['录用', 'OFFER'],
+        ['入职', 'ONBOARDING'],
+      ]);
+    });
+
+    it('不能删除系统阶段', async () => {
+      const res = await put([all[0], all[1], all[3]]);
+      expect(res.status).toBe(400);
+      expect((await res.json()).message).toContain('系统阶段');
+      expect(await read()).toHaveLength(4);
+    });
+
+    it('不能打乱系统阶段的先后顺序', async () => {
+      const res = await put([all[0], all[2], all[1], all[3]]);
+      expect(res.status).toBe(400);
+      expect((await read()).map((r) => r.id)).toEqual(['k1', 'k2', 'k3', 'k4']);
+    });
+  });
 });

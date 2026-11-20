@@ -6,18 +6,10 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ACTIVITY_ACTIONS, PERMISSIONS, RoleCode } from '@hireflow/shared';
+import { ACTIVITY_ACTIONS, StageKind } from '@hireflow/shared';
 import { departmentScopeOf, isAssignedScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
-import {
-  assertPortalLive,
-  candidateActor,
-  isPortalLive,
-  newPortalToken,
-  PORTAL_TTL,
-  portalExpiry,
-  portalLinkInvalid,
-} from '../../common/portal';
+import { ensurePortalLink, PORTAL_TTL, portalExpiry } from '../../common/portal';
 import type { Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { AiService } from '../ai/ai.service';
@@ -33,6 +25,44 @@ export interface BatchResult {
   failed: Array<{ id: string; candidate: string | null; error: string }>;
 }
 
+/** 看板卡片上的面试轮次标签：取最近一场没有取消的面试 */
+const CARD_INTERVIEWS = {
+  where: { status: { not: 'CANCELED' } },
+  orderBy: { round: 'desc' },
+  take: 1,
+  select: {
+    round: true,
+    status: true,
+    scheduledAt: true,
+    _count: { select: { interviewers: true } },
+    evaluations: { where: { submittedAt: { not: null } }, select: { id: true } },
+  },
+} satisfies Prisma.Application$interviewsArgs;
+
+type CardInterview = {
+  round: number;
+  status: string;
+  scheduledAt: Date | null;
+  _count: { interviewers: number };
+  evaluations: Array<{ id: string }>;
+};
+
+/** 轮次标签：「二面 · 待面评」这类信息，替代原来的一面 / 二面两列 */
+export function interviewTag(interviews: CardInterview[] | undefined) {
+  const latest = interviews?.[0];
+  if (!latest) return null;
+  const submitted = latest.evaluations.length;
+  const total = latest._count.interviewers;
+  const state = !latest.scheduledAt
+    ? 'unscheduled'
+    : latest.status === 'SCHEDULED'
+      ? 'scheduled'
+      : submitted >= total
+        ? 'evaluated'
+        : 'awaiting_evaluation';
+  return { round: latest.round, state, scheduledAt: latest.scheduledAt, submitted, total };
+}
+
 const CARD_SELECT = {
   id: true,
   status: true,
@@ -43,8 +73,6 @@ const CARD_SELECT = {
   stageId: true,
   stageEnteredAt: true,
   version: true,
-  // 预筛结果要在看板卡片上看得见：不符项标出来，HR 不用点进详情才知道要人工判断
-  prescreen: true,
   candidate: { select: { id: true, name: true, tags: true, source: true } },
 } as const;
 
@@ -227,8 +255,7 @@ export class ApplicationsService {
 
   /**
    * 看板数据：按阶段分组返回该职位在途 + 已入职的候选人。
-   * HIRED 必须一起返回——入职闭环会把卡片推进末列「已入职」并同时置为 HIRED，
-   * 只查 ACTIVE 会让卡片在到达终点的同一刻从看板上消失（末列结构性恒空）。
+   * HIRED 也一起返回：入职完成后卡片留在「入职」列并标记已入职，只查 ACTIVE 会让卡片在到达终点时消失。
    * 淘汰/撤回仍然不进看板：它们已经离开流程，在候选人详情的时间轴里查看。
    */
   async board(jobId: string, user?: JwtUser) {
@@ -257,7 +284,7 @@ export class ApplicationsService {
             applications: {
               where: { status: { in: ['ACTIVE', 'HIRED'] } },
               orderBy: { position: 'asc' },
-              select: CARD_SELECT,
+              select: { ...CARD_SELECT, interviews: CARD_INTERVIEWS },
             },
           },
         },
@@ -273,8 +300,11 @@ export class ApplicationsService {
       job: { id: job.id, title: job.title, status: job.status },
       closedCount,
       columns: job.stages.map((stage) => ({
-        stage: { id: stage.id, name: stage.name, order: stage.order },
-        applications: stage.applications,
+        stage: { id: stage.id, name: stage.name, kind: stage.kind, order: stage.order },
+        applications: stage.applications.map(({ interviews, ...card }) => ({
+          ...card,
+          interview: interviewTag(interviews),
+        })),
       })),
     };
   }
@@ -306,28 +336,15 @@ export class ApplicationsService {
     if (isBackward && !dto.reason?.trim()) {
       throw new BadRequestException('回退阶段必须填写原因（受控回退）');
     }
-    // 自动化接管列拦截：终段列由业务事件驱动，手动拖入需实体状态背书，
-    // 否则看板列与实体状态脱钩、漏斗虚报（状态强校验，拒绝非法流转）
-    if (!isBackward && targetStage.name === '待入职') {
+    // 「入职」列由候选人接受 Offer 驱动：手动拖入需要实体状态背书，否则看板和实际状态脱钩、漏斗虚报。
+    // 按阶段类型判断，阶段改名不影响
+    if (!isBackward && targetStage.kind === StageKind.ONBOARDING) {
       const offer = await this.prisma.offer.findUnique({
         where: { applicationId: id },
         select: { decision: true },
       });
       if (offer?.decision !== 'ACCEPTED') {
-        throw new BadRequestException(
-          '「待入职」由候选人接受 Offer 后自动流转：请先在录用管理中完成 Offer 发送与答复',
-        );
-      }
-    }
-    if (!isBackward && targetStage.name === '已入职') {
-      const onboarding = await this.prisma.onboarding.findUnique({
-        where: { applicationId: id },
-        select: { status: true },
-      });
-      if (onboarding?.status !== 'COMPLETED') {
-        throw new BadRequestException(
-          '「已入职」由入职闭环自动流转（三方清单完成 + 合同签署），不可手动拖入',
-        );
+        throw new BadRequestException(`「${targetStage.name}」在候选人接受 Offer 后自动进入，请先发送 Offer`);
       }
     }
 
@@ -363,6 +380,9 @@ export class ApplicationsService {
         candidate: application.candidate.name,
         from: application.stage.name,
         to: targetStage.name,
+        fromStageId: application.stageId,
+        toStageId: targetStage.id,
+        toKind: targetStage.kind,
         ...(isBackward ? { reason: dto.reason } : {}),
       },
     );
@@ -492,130 +512,6 @@ export class ApplicationsService {
     return { jobTitle: apps[0].job.title, candidates, ai: data, aiMeta: meta };
   }
 
-  // ---------- AI 预筛机器人（邀约前自动核实硬性条件） ----------
-
-  /**
-   * 生成/复用预筛链接（HR 发给候选人，token 即凭证）。
-   * - 仍在有效期内：复用同一令牌并把有效期顺延 7 天（重发）；
-   * - 已过期或 rotate=true：换新令牌，旧链接立即失效。
-   */
-  async sendPrescreen(id: string, user: JwtUser, rotate = false) {
-    const application = await this.prisma.application.findUnique({
-      where: { id },
-      include: { candidate: { select: { name: true } }, job: { select: { title: true } } },
-    });
-    if (!application) throw new NotFoundException('应聘记录不存在');
-    await this.assertJobDepartmentScope(application.jobId, user);
-    if (application.status !== 'ACTIVE') throw new BadRequestException('该应聘已不在流程中');
-    if (application.prescreen) throw new BadRequestException('候选人已提交过预筛信息，无需再发链接');
-
-    const reuse = application.prescreenToken && !rotate && isPortalLive(application.prescreenExpiresAt);
-    const token = reuse ? application.prescreenToken! : newPortalToken();
-    await this.prisma.application.update({
-      where: { id },
-      data: { prescreenToken: token, prescreenExpiresAt: portalExpiry(PORTAL_TTL.PRESCREEN_MS) },
-    });
-    if (!application.prescreenToken) {
-      await this.activityLog.record(user, ACTIVITY_ACTIONS.PRESCREEN_SENT, 'Application', id, {
-        candidate: application.candidate.name,
-        job: application.job.title,
-      });
-    } else if (!reuse) {
-      await this.activityLog.record(user, ACTIVITY_ACTIONS.PORTAL_LINK_ROTATED, 'Application', id, {
-        candidate: application.candidate.name,
-        portal: 'prescreen',
-      });
-    }
-    return { token };
-  }
-
-  /** 候选人视角的预筛页（@Public） */
-  async prescreenView(token: string) {
-    const application = await this.prisma.application.findUnique({
-      where: { prescreenToken: token },
-      include: { candidate: { select: { name: true } }, job: { select: { title: true } } },
-    });
-    if (!application) throw portalLinkInvalid();
-    assertPortalLive(application.prescreenExpiresAt);
-    return {
-      company: 'ART 科技有限公司',
-      candidateName: application.candidate.name,
-      jobTitle: application.job.title,
-      prescreen: application.prescreen,
-      /** 已淘汰 / 撤回 / 入职：问卷不再开放 */
-      closed: application.status !== 'ACTIVE',
-    };
-  }
-
-  /**
-   * 候选人提交预筛三问（薪资/到岗/出差）。硬性条件核验（不符拦截）：
-   * 期望薪资超过该职位已发 Offer 最高 base 的 120% → 标记；到岗超 60 天 → 标记；不接受出差 → 标记。
-   * 标记不自动淘汰（AI/规则永不直接淘汰人），推送 HR 人工判断。
-   */
-  async prescreenSubmit(
-    token: string,
-    dto: { expectedSalary: number; availableDate: string; travelOk: boolean; note?: string },
-  ) {
-    const application = await this.prisma.application.findUnique({
-      where: { prescreenToken: token },
-      include: { candidate: { select: { id: true, name: true } }, job: { select: { id: true, title: true, departmentId: true } } },
-    });
-    if (!application) throw portalLinkInvalid();
-    assertPortalLive(application.prescreenExpiresAt);
-    if (application.status !== 'ACTIVE') throw new BadRequestException('该应聘已不在流程中，预筛链接已失效');
-    if (application.prescreen) throw new BadRequestException('预筛信息已提交过，如需更正请联系 HR');
-
-    const flags: string[] = [];
-    // salary 是 JSON 字段，取「最高」只能在应用层比较（DB 侧 orderBy 只能按 createdAt，选不出最高 base）
-    const sentOffers = await this.prisma.offer.findMany({
-      where: { application: { jobId: application.job.id }, sentAt: { not: null } },
-      select: { salary: true },
-    });
-    const band = sentOffers.reduce<number | undefined>((max, o) => {
-      const base = (o.salary as { base?: number } | null)?.base;
-      return base != null && (max === undefined || base > max) ? base : max;
-    }, undefined);
-    if (band && dto.expectedSalary > band * 1.2) {
-      flags.push(`期望薪资 ¥${dto.expectedSalary} 超出该职位近期 Offer 水平（¥${band}）20% 以上`);
-    }
-    const days = (new Date(dto.availableDate).getTime() - Date.now()) / 86_400_000;
-    if (Number.isFinite(days) && days > 60) flags.push('最早到岗时间超过 60 天');
-    if (!dto.travelOk) flags.push('不接受出差安排');
-
-    const prescreen = {
-      expectedSalary: dto.expectedSalary,
-      availableDate: dto.availableDate,
-      travelOk: dto.travelOk,
-      note: dto.note ?? null,
-      flags,
-      submittedAt: new Date().toISOString(),
-    };
-    // 一次性：提交后不可再改，链接只再保留 3 天用于回看「已提交」
-    await this.prisma.application.update({
-      where: { id: application.id },
-      data: {
-        prescreen: prescreen as unknown as Prisma.InputJsonValue,
-        prescreenExpiresAt: portalExpiry(PORTAL_TTL.PRESCREEN_AFTER_SUBMIT_MS),
-      },
-    });
-    const actor = candidateActor(application.candidate.name);
-    await this.activityLog.record(actor, ACTIVITY_ACTIONS.PRESCREEN_SUBMITTED, 'Application', application.id, {
-      candidate: application.candidate.name,
-      flags,
-    });
-    await this.notifications.pushByPermission(
-      PERMISSIONS.INTERVIEW_SCHEDULE,
-      application.job.departmentId,
-      flags.length
-        ? `预筛存在不符项：${application.candidate.name}`
-        : `预筛已回收：${application.candidate.name}`,
-      flags.length
-        ? `${application.job.title} · ${flags.join('；')} · 请人工判断是否继续邀约`
-        : `${application.job.title} · 硬性条件均符合，可安排邀约`,
-      `/candidates?candidate=${application.candidate.id}`,
-    );
-    return this.prescreenView(token);
-  }
 
   /** 顺序执行保证列内 position 分配与留痕顺序稳定；单次上限已由 DTO 约束（≤100） */
   private async runBatch(ids: string[], op: (id: string) => Promise<unknown>): Promise<BatchResult> {
@@ -641,33 +537,30 @@ export class ApplicationsService {
     return { total: uniqueIds.length, succeeded, failed };
   }
 
-  /** 按阶段名称自动移卡（自动化工作流用：发起 Offer→Offer、接受→待入职、签约→已入职）；阶段不存在或需回退则跳过 */
-  async moveToStageByName(applicationId: string, stageName: string, user: JwtUser) {
-    const application = await this.prisma.application.findUniqueOrThrow({
+  /**
+   * 自动流转：按阶段类型移卡（约面试 → 面试、发 Offer → 录用、接受 Offer → 入职）。
+   * 只向前推进，卡片已经越过目标列时不回拖；可以传入事务客户端，和触发它的状态变更一起提交。
+   */
+  async moveToStageKind(applicationId: string, kind: StageKind, user: JwtUser, db: Prisma.TransactionClient = this.prisma) {
+    const application = await db.application.findUniqueOrThrow({
       where: { id: applicationId },
       include: { stage: true, candidate: { select: { name: true } } },
     });
-    const target = await this.prisma.pipelineStage.findFirst({
-      where: { jobId: application.jobId, name: stageName },
-    });
+    if (application.status !== 'ACTIVE') return;
+    const target = await db.pipelineStage.findFirst({ where: { jobId: application.jobId, kind } });
     if (!target) {
-      // 阶段名是自动化的唯一锚点，而阶段名可被 Pipeline Builder 改写；
-      // 匹配不上时业务主流程不该中断，但必须留下噪音，否则整条 Offer→入职 自动化会无声失效
-      this.logger.warn(
-        `自动流转跳过：职位 ${application.jobId} 没有名为「${stageName}」的阶段（应聘 ${applicationId}），` +
-          `该阶段可能已被重命名或删除，卡片位置需要人工确认`,
-      );
+      // 系统阶段不允许删除，正常不会走到这里；旧数据缺阶段时不中断主流程，但要留下日志
+      this.logger.warn(`自动流转跳过：职位 ${application.jobId} 没有类型为 ${kind} 的阶段（应聘 ${applicationId}）`);
       return;
     }
-    if (target.id === application.stageId) return;
-    // 自动化只向前推进：卡片已越过目标列时不回拖（如已在待入职时补发 Offer 事件）
-    if (target.order < application.stage.order) return;
-    await this.prisma.application.update({
+    if (target.id === application.stageId || target.order < application.stage.order) return;
+    const last = await db.application.aggregate({ where: { stageId: target.id }, _max: { position: true } });
+    await db.application.update({
       where: { id: applicationId },
       data: {
         stageId: target.id,
-        position: await this.nextPosition(target.id),
-        // 与手动移卡保持一致：重置停留时长起点并递增乐观锁版本，否则自动流转后统计与并发校验失真
+        position: (last._max.position ?? 0) + 1,
+        // 与手动移卡一致：重置停留时长起点并递增乐观锁版本
         stageEnteredAt: new Date(),
         version: { increment: 1 },
       },
@@ -677,8 +570,36 @@ export class ApplicationsService {
       ACTIVITY_ACTIONS.APPLICATION_STAGE_CHANGED,
       'Application',
       applicationId,
-      { candidate: application.candidate.name, from: application.stage.name, to: stageName },
+      {
+        candidate: application.candidate.name,
+        from: application.stage.name,
+        to: target.name,
+        fromStageId: application.stageId,
+        toStageId: target.id,
+        toKind: target.kind,
+      },
+      db,
     );
+  }
+
+  /** HR 获取 / 重新生成候选人页链接（rotate：旧链接立即失效） */
+  async portalLink(id: string, user: JwtUser, rotate = false) {
+    const application = await this.prisma.application.findUnique({
+      where: { id },
+      select: { id: true, jobId: true, status: true, candidate: { select: { name: true } } },
+    });
+    if (!application) throw new NotFoundException('应聘记录不存在');
+    await this.assertJobDepartmentScope(application.jobId, user);
+    if (application.status === 'REJECTED' || application.status === 'WITHDRAWN') {
+      throw new BadRequestException('该应聘已结束，不再发放候选人页链接');
+    }
+    const link = await ensurePortalLink(this.prisma, id, portalExpiry(PORTAL_TTL.DEFAULT_MS), rotate);
+    if (link.rotated) {
+      await this.activityLog.record(user, ACTIVITY_ACTIONS.PORTAL_LINK_ROTATED, 'Application', id, {
+        candidate: application.candidate.name,
+      });
+    }
+    return { token: link.token, expiresAt: link.expiresAt };
   }
 
   private async nextPosition(stageId: string): Promise<number> {

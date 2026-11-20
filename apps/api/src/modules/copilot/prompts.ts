@@ -11,14 +11,12 @@ const ROLE_NAMES: Record<string, string> = {
   HR: 'HR / 招聘专员',
   HIRING_MANAGER: '用人经理',
   INTERVIEWER: '面试官',
-  IT_SUPPORT: 'IT / 行政',
 };
 
 const SCOPE_NAMES: Record<string, string> = {
   ALL: '全部数据',
   DEPARTMENT: '本部门（含下级部门）',
   ASSIGNED: '仅被指派给你的候选人 / 面试',
-  OWN: '仅本人',
 };
 
 /**

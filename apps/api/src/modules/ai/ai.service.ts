@@ -14,7 +14,6 @@ import type {
   HelpdeskInput,
   JdInput,
   MatchInput,
-  RetentionInput,
 } from './engines/ai-engine.interface';
 import { AnthropicAiEngine } from './engines/anthropic.engine';
 import type { LlmEngine } from './engines/llm.engine';
@@ -308,10 +307,6 @@ export class AiService {
 
   answerQuestion(input: HelpdeskInput) {
     return this.run('answerQuestion', (e) => e.answerQuestion(input));
-  }
-
-  predictRetention(input: RetentionInput) {
-    return this.run('predictRetention', (e) => e.predictRetention(input));
   }
 
   compareCandidates(input: CompareInput) {

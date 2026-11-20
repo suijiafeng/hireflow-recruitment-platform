@@ -134,7 +134,7 @@ export class CandidatesService {
           applications: {
             include: {
               job: { select: { id: true, title: true } },
-              stage: { select: { id: true, name: true } },
+              stage: { select: { id: true, name: true, kind: true } },
             },
           },
           _count: { select: { resumes: true } },
@@ -194,9 +194,9 @@ export class CandidatesService {
         applications: {
           include: {
             job: { select: { id: true, title: true, scorecardTemplate: true } },
-            stage: { select: { id: true, name: true } },
+            stage: { select: { id: true, name: true, kind: true } },
             // 详情里要知道这条应聘是否已有 Offer：有就给「查看 Offer」，别让 HR 填完才被告知已存在
-            offer: { select: { id: true, approvalStatus: true, decision: true } },
+            offer: { select: { id: true, status: true, decision: true } },
             interviews: {
               include: {
                 interviewers: { include: { user: { select: { id: true, name: true } } } },

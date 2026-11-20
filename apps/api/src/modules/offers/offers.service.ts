@@ -5,40 +5,25 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  ACTIVITY_ACTIONS,
-  OFFER_DECLINE_REASONS,
-  OFFER_VALID_BUSINESS_DAYS,
-  PERMISSIONS,
-  RoleCode,
-} from '@hireflow/shared';
+import { ACTIVITY_ACTIONS, OFFER_DECLINE_REASONS, OFFER_VALID_BUSINESS_DAYS, PERMISSIONS, RoleCode, StageKind } from '@hireflow/shared';
+import { companyName } from '../../common/company';
 import { departmentScopeOf, inDepartmentScope } from '../../common/data-scope';
 import type { JwtUser } from '../../common/decorators/current-user.decorator';
-import {
-  addBusinessDays,
-  assertPortalLive,
-  candidateActor,
-  CN_TZ_OFFSET_MS,
-  newPortalToken,
-  PORTAL_TTL,
-  portalExpiry,
-  portalLinkInvalid,
-} from '../../common/portal';
+import { addBusinessDays, candidateActor, CN_TZ_OFFSET_MS, ensurePortalLink, PORTAL_TTL, portalExpiry } from '../../common/portal';
 import type { Offer, Prisma } from '../../generated/prisma/client';
 import { ActivityLogService } from '../activity-log/activity-log.service';
-import { AiService } from '../ai/ai.service';
 import { ApplicationsService } from '../applications/applications.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OnboardingService } from '../onboarding/onboarding.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ApprovalDto, CreateOfferDto, ResubmitOfferDto, RespondDto } from './dto/create-offer.dto';
+import { CreateOfferDto, RespondDto } from './dto/create-offer.dto';
 
 const OFFER_INCLUDE = {
   application: {
     select: {
       id: true,
       stageId: true,
-      candidate: { select: { id: true, name: true, tags: true } },
+      candidate: { select: { id: true, name: true, tags: true, email: true } },
       job: { select: { id: true, title: true, departmentId: true, department: { select: { name: true } } } },
     },
   },
@@ -49,34 +34,33 @@ type OfferWithRelations = Prisma.OfferGetPayload<{ include: typeof OFFER_INCLUDE
 /** @db.Date 列按日历日下发（YYYY-MM-DD），避免前端按本地时区解析 UTC 零点后错一天 */
 const dateOnly = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
+/** Offer 发出后候选人页至少保持到答复截止后 7 天 */
+const offerPortalUntil = (expiresAt: Date) => portalExpiry(PORTAL_TTL.OFFER_AFTER_DEADLINE_MS, expiresAt);
+
+/**
+ * Offer：HR 发起即发送（不再审批），候选人在候选人页答复。
+ * 接受后在同一个事务里创建入职单和合同、把卡片移到「入职」；通知在事务提交后发送。
+ */
 @Injectable()
 export class OffersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activityLog: ActivityLogService,
-    private readonly ai: AiService,
     private readonly onboarding: OnboardingService,
     private readonly applications: ApplicationsService,
     private readonly notifications: NotificationsService,
   ) {}
 
-  /**
-   * 后台视图出口（所有返回给登录用户的 Offer 都经过这里）：
-   * - portalToken 一律不下发：它是候选人答复 Offer 的唯一凭证，审批人持有就能替候选人接受/拒绝。
-   *   需要链接时走 POST /offers/:id/portal-link（offer:initiate）。
-   * - 薪资是敏感字段：无 salary:view 权限时整体抹除。
-   */
-  private present<T extends Partial<Offer>>(offer: T, user: JwtUser): Omit<T, 'portalToken'> {
-    const { portalToken: _token, ...base } = offer;
-    const rest = (base.startDate ? { ...base, startDate: dateOnly(base.startDate) } : base) as typeof base;
+  /** 薪资是敏感字段：无 salary:view 权限时整体抹除 */
+  private present<T extends Partial<Offer>>(offer: T, user: JwtUser): T {
+    const rest = (offer.startDate ? { ...offer, startDate: dateOnly(offer.startDate) } : offer) as T;
     if (user.permissions.includes(PERMISSIONS.SALARY_VIEW)) return rest;
     return { ...rest, salary: null };
   }
 
   private ensureCanRead(user: JwtUser) {
     const ok =
-      user.permissions.includes(PERMISSIONS.OFFER_INITIATE) ||
-      user.permissions.includes(PERMISSIONS.OFFER_APPROVE);
+      user.permissions.includes(PERMISSIONS.OFFER_INITIATE) || user.permissions.includes(PERMISSIONS.OFFER_READ);
     if (!ok) throw new ForbiddenException('无权查看 Offer 数据');
   }
 
@@ -89,12 +73,15 @@ export class OffersService {
       include: OFFER_INCLUDE,
       orderBy: { updatedAt: 'desc' },
     });
-    // 懒过期扫描：无独立调度器（MVP），到期未答复的在读取时统一失效并通知
+    // 兜底的懒过期：定时任务之外，读取时也把到期未答复的置为失效
     const swept = await Promise.all(offers.map((o) => this.expireIfDue(o)));
     return swept.map((o) => this.present(o, user));
   }
 
-  /** 发起 Offer（HR）：直接进入待审批（生成 Offer → 走审批流） */
+  /**
+   * 发起并发送 Offer（HR）：不经审批，直接进入 5 个工作日答复期，候选人页同时可以答复。
+   * 上一份 Offer 已终结（候选人拒绝 / 过期）时可以重新发起，旧方案记在时间轴 payload.previous。
+   */
   async create(dto: CreateOfferDto, user: JwtUser) {
     const application = await this.prisma.application.findUnique({
       where: { id: dto.applicationId },
@@ -102,270 +89,149 @@ export class OffersService {
     });
     if (!application) throw new NotFoundException('应聘记录不存在');
     if (application.status !== 'ACTIVE') throw new BadRequestException('该应聘已不在流程中');
+    this.assertDepartment(user, application.job.departmentId);
     const previous = application.offer;
-    // 一条应聘一份 Offer：只有上一份已经终结（候选人拒绝 / 过期未续）才能重新发起，
-    // 旧方案的薪资与答复在时间轴里已有留痕，这里再记一份到 payload.previous
-    const previousClosed = previous && (previous.decision === 'DECLINED' || previous.approvalStatus === 'EXPIRED');
+    const previousClosed = previous && (previous.decision === 'DECLINED' || previous.status === 'EXPIRED');
     if (previous && !previousClosed) throw new ConflictException('该应聘记录已存在 Offer');
 
+    const now = new Date();
+    const expiresAt = addBusinessDays(now, OFFER_VALID_BUSINESS_DAYS);
     const data = {
-      salary: {
-        base: dto.salaryBase,
-        bonusMonths: dto.bonusMonths ?? 0,
-        note: dto.note ?? null,
-      },
+      salary: { base: dto.salaryBase, bonusMonths: dto.bonusMonths ?? 0, note: dto.note ?? null },
       grade: dto.grade,
       startDate: this.parseStartDate(dto.startDate),
-      approvalStatus: 'PENDING' as const,
+      status: 'SENT' as const,
+      sentAt: now,
+      expiresAt,
+      extendedOnce: false,
+      respondedAt: null,
+      decision: null,
+      decisionReason: null,
     };
-    const offer = previous
-      ? await this.prisma.offer.update({
-          where: { id: previous.id },
-          data: {
-            ...data,
-            approvalNote: null,
-            sentAt: null,
-            expiresAt: null,
-            extendedOnce: false,
-            portalToken: null, // 旧链接作废：候选人不能用它看到新方案
-            portalExpiresAt: null,
-            respondedAt: null,
-            decision: null,
-            decisionReason: null,
-          },
-          include: OFFER_INCLUDE,
-        })
-      : await this.prisma.offer.create({ data: { applicationId: dto.applicationId, ...data }, include: OFFER_INCLUDE });
-    await this.activityLog.record(user, ACTIVITY_ACTIONS.OFFER_INITIATED, 'Application', dto.applicationId, {
-      candidate: application.candidate.name,
-      job: application.job.title,
-      grade: dto.grade ?? null,
-      ...(previous
-        ? {
-            reissued: true,
-            previous: {
-              salary: previous.salary,
-              grade: previous.grade,
-              decision: previous.decision,
-              decisionReason: previous.decisionReason,
-              approvalStatus: previous.approvalStatus,
-            },
-          }
-        : {}),
+    const offer = await this.prisma.$transaction(async (tx) => {
+      const offer = previous
+        ? await tx.offer.update({ where: { id: previous.id }, data, include: OFFER_INCLUDE })
+        : await tx.offer.create({ data: { applicationId: dto.applicationId, ...data }, include: OFFER_INCLUDE });
+      await ensurePortalLink(tx, dto.applicationId, offerPortalUntil(expiresAt));
+      await this.activityLog.record(
+        user,
+        ACTIVITY_ACTIONS.OFFER_SENT,
+        'Application',
+        dto.applicationId,
+        {
+          candidate: application.candidate.name,
+          job: application.job.title,
+          grade: dto.grade ?? null,
+          expiresAt: expiresAt.toISOString(),
+          ...(previous
+            ? {
+                reissued: true,
+                previous: {
+                  salary: previous.salary,
+                  grade: previous.grade,
+                  decision: previous.decision,
+                  decisionReason: previous.decisionReason,
+                  status: previous.status,
+                },
+              }
+            : {}),
+        },
+        tx,
+      );
+      // 看板与实体状态对齐：发出 Offer 即自动移卡到「录用」
+      await this.applications.moveToStageKind(dto.applicationId, StageKind.OFFER, user, tx);
+      return offer;
     });
-    // 看板与实体状态对齐：发起 Offer 即自动移卡到「Offer」列（auto 留痕）
-    await this.applications.moveToStageByName(dto.applicationId, 'Offer', user);
-    // 通知矩阵：Offer 审批待办 → 用人经理；职位未指定用人经理时兜底到有审批权的人，否则没人知道要审批
     await this.notifications.push(
       await this.notifications.jobManagerIds(application.job.id),
-      `Offer 待审批：${application.candidate.name}`,
-      `${application.job.title} · 由 ${user.name} 发起`,
-      `/offers?tab=approve&focus=${offer.id}`,
+      `Offer 已发出：${application.candidate.name}`,
+      `${application.job.title} · 由 ${user.name} 发出，答复截止 ${dateOnly(expiresAt)}`,
+      `/offers?focus=${offer.id}`,
     );
     return this.present(offer, user);
   }
 
-  /** 用人经理审批（HR 发起 / 用人经理审批）；驳回意见随 Offer 退回 HR */
-  async approve(id: string, dto: ApprovalDto, approve: boolean, user: JwtUser) {
-    const offer = await this.findOrThrow(id);
-    if (offer.approvalStatus !== 'PENDING') {
-      throw new BadRequestException(`当前状态（${offer.approvalStatus}）不可审批`);
-    }
-    if (!approve && !dto.note?.trim()) {
-      throw new BadRequestException('驳回必须填写审批意见，供 HR 修改重提');
-    }
-    // 数据行级权限：用人经理仅可审批本部门职位的 Offer
-    const deptScope = departmentScopeOf(user);
-    if (deptScope) {
-      const owned = await this.prisma.job.findFirst({
-        where: { id: offer.application.job.id, departmentId: { in: deptScope } },
-        select: { id: true },
-      });
-      if (!owned) throw new ForbiddenException('仅可审批本部门职位的 Offer（数据范围：本部门）');
-    }
-    // 状态前置条件进写入条件：并发重复审批只成功一次
-    const result = await this.prisma.offer.updateMany({
-      where: { id, approvalStatus: 'PENDING' },
-      data: { approvalStatus: approve ? 'APPROVED' : 'REJECTED', approvalNote: dto.note ?? null },
-    });
-    if (result.count === 0) throw new ConflictException('该 Offer 刚被他人处理，请刷新');
-    const updated = await this.findOrThrow(id);
-    await this.activityLog.record(
-      user,
-      approve ? ACTIVITY_ACTIONS.OFFER_APPROVED : ACTIVITY_ACTIONS.OFFER_REJECTED,
-      'Application',
-      offer.applicationId,
-      { candidate: offer.application.candidate.name, note: dto.note ?? null },
-    );
-    await this.notifications.pushByPermission(
-      PERMISSIONS.OFFER_INITIATE,
-      offer.application.job.departmentId,
-      `Offer ${approve ? '审批通过' : '被驳回'}：${offer.application.candidate.name}`,
-      `${offer.application.job.title} · ${user.name}${dto.note ? ` · ${dto.note}` : ''}`,
-      `/offers?focus=${offer.id}`,
-    );
-    return this.present(updated, user);
-  }
-
-  /** 驳回后修改重提：更新薪资包 → 重新进入待审批 */
-  async resubmit(id: string, dto: ResubmitOfferDto, user: JwtUser) {
-    const offer = await this.findOrThrow(id);
-    if (offer.approvalStatus !== 'REJECTED') {
-      throw new BadRequestException('仅被驳回的 Offer 可修改重提');
-    }
-    const updated = await this.prisma.offer.update({
-      where: { id },
-      data: {
-        salary: { base: dto.salaryBase, bonusMonths: dto.bonusMonths ?? 0, note: dto.note ?? null },
-        grade: dto.grade,
-        startDate: this.parseStartDate(dto.startDate),
-        approvalStatus: 'PENDING',
-        approvalNote: null, // 旧驳回意见已留痕于时间轴，字段清空避免误读
-      },
-      include: OFFER_INCLUDE,
-    });
-    await this.activityLog.record(user, ACTIVITY_ACTIONS.OFFER_RESUBMITTED, 'Application', offer.applicationId, {
-      candidate: offer.application.candidate.name,
-      grade: dto.grade ?? null,
-      previousNote: offer.approvalNote,
-    });
-    await this.notifications.push(
-      await this.notifications.jobManagerIds(offer.application.job.id),
-      `Offer 修改重提待审批：${offer.application.candidate.name}`,
-      `${offer.application.job.title} · 由 ${user.name} 重提`,
-      `/offers?tab=approve&focus=${offer.id}`,
-    );
-    return this.present(updated, user);
-  }
-
-  /**
-   * 电子发送 Offer（三期先模拟发送，邮件通道后续接入）：
-   * 生成免登录门户令牌 + 答复截止时间（+5 个工作日）。
-   */
+  /** 发送迁移前遗留的未发出 Offer（DRAFT → SENT） */
   async send(id: string, user: JwtUser) {
     const offer = await this.findOrThrow(id);
-    if (offer.approvalStatus !== 'APPROVED') {
-      throw new BadRequestException('仅已批准的 Offer 可发送');
-    }
+    this.assertDepartment(user, offer.application.job.departmentId);
+    if (offer.status !== 'DRAFT') throw new BadRequestException('该 Offer 已发出');
     const expiresAt = addBusinessDays(new Date(), OFFER_VALID_BUSINESS_DAYS);
-    const result = await this.prisma.offer.updateMany({
-      where: { id, approvalStatus: 'APPROVED' },
-      data: {
-        approvalStatus: 'SENT',
-        sentAt: new Date(),
-        expiresAt,
-        portalToken: offer.portalToken ?? newPortalToken(),
-        portalExpiresAt: portalExpiry(PORTAL_TTL.OFFER_AFTER_DEADLINE_MS, expiresAt),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      const result = await tx.offer.updateMany({
+        where: { id, status: 'DRAFT' },
+        data: { status: 'SENT', sentAt: new Date(), expiresAt },
+      });
+      if (result.count === 0) throw new ConflictException('该 Offer 刚被他人处理，请刷新');
+      await ensurePortalLink(tx, offer.applicationId, offerPortalUntil(expiresAt));
+      await this.activityLog.record(
+        user,
+        ACTIVITY_ACTIONS.OFFER_SENT,
+        'Application',
+        offer.applicationId,
+        { candidate: offer.application.candidate.name, expiresAt: expiresAt.toISOString() },
+        tx,
+      );
+      await this.applications.moveToStageKind(offer.applicationId, StageKind.OFFER, user, tx);
     });
-    if (result.count === 0) throw new ConflictException('该 Offer 刚被他人处理，请刷新');
-    const updated = await this.findOrThrow(id);
-    await this.activityLog.record(user, ACTIVITY_ACTIONS.OFFER_SENT, 'Application', offer.applicationId, {
-      candidate: offer.application.candidate.name,
-      expiresAt: expiresAt.toISOString(),
-    });
-    return this.present(updated, user);
+    return this.present(await this.findOrThrow(id), user);
   }
 
   /** 续期一次：SENT/EXPIRED 未答复的 Offer 重新给 5 个工作日 */
   async extend(id: string, user: JwtUser) {
     let offer = await this.findOrThrow(id);
+    this.assertDepartment(user, offer.application.job.departmentId);
     offer = await this.expireIfDue(offer);
     if (offer.decision) throw new BadRequestException('该 Offer 已有答复，无需续期');
-    if (offer.approvalStatus !== 'SENT' && offer.approvalStatus !== 'EXPIRED') {
+    if (offer.status !== 'SENT' && offer.status !== 'EXPIRED') {
       throw new BadRequestException('仅已发送/已失效的 Offer 可续期');
     }
     if (offer.extendedOnce) throw new BadRequestException('有效期仅可续期一次');
 
     const expiresAt = addBusinessDays(new Date(), OFFER_VALID_BUSINESS_DAYS);
-    const updated = await this.prisma.offer.update({
-      where: { id },
-      data: {
-        approvalStatus: 'SENT',
-        expiresAt,
-        extendedOnce: true,
-        portalExpiresAt: portalExpiry(PORTAL_TTL.OFFER_AFTER_DEADLINE_MS, expiresAt),
-      },
-      include: OFFER_INCLUDE,
-    });
-    await this.activityLog.record(user, ACTIVITY_ACTIONS.OFFER_EXTENDED, 'Application', offer.applicationId, {
-      candidate: offer.application.candidate.name,
-      until: expiresAt.toISOString(),
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.offer.updateMany({
+        where: { id, decision: null, extendedOnce: false },
+        data: { status: 'SENT', expiresAt, extendedOnce: true },
+      });
+      if (result.count === 0) throw new ConflictException('该 Offer 刚被他人处理，请刷新');
+      await ensurePortalLink(tx, offer.applicationId, offerPortalUntil(expiresAt));
+      await this.activityLog.record(
+        user,
+        ACTIVITY_ACTIONS.OFFER_EXTENDED,
+        'Application',
+        offer.applicationId,
+        { candidate: offer.application.candidate.name, until: expiresAt.toISOString() },
+        tx,
+      );
+      return tx.offer.findUniqueOrThrow({ where: { id }, include: OFFER_INCLUDE });
     });
     return this.present(updated, user);
   }
 
-  /**
-   * 确保门户链接存在（发送前的旧数据补发令牌用），返回给前端拼 /portal/offer/:token。
-   * rotate=true：重新生成令牌，旧链接立即失效（链接误发或疑似泄露时用）。
-   */
-  async ensurePortalToken(id: string, user: JwtUser, rotate = false) {
-    let offer = await this.findOrThrow(id);
-    offer = await this.expireIfDue(offer);
-    if (offer.approvalStatus !== 'SENT' && offer.approvalStatus !== 'EXPIRED') {
-      throw new BadRequestException('仅已发送的 Offer 有候选人链接');
-    }
-    if (!offer.portalToken || rotate) {
-      const expiresAt = offer.expiresAt ?? addBusinessDays(new Date(), OFFER_VALID_BUSINESS_DAYS);
-      // 门户硬过期：已答复的从现在起留 14 天；未答复的到答复截止后 7 天（且至少从现在起 7 天）
-      const portalExpiresAt = offer.decision
-        ? portalExpiry(PORTAL_TTL.OFFER_AFTER_DECISION_MS)
-        : portalExpiry(PORTAL_TTL.OFFER_AFTER_DEADLINE_MS, new Date(Math.max(expiresAt.getTime(), Date.now())));
-      offer = await this.prisma.offer.update({
-        where: { id },
-        data: { portalToken: newPortalToken(), expiresAt, portalExpiresAt },
-        include: OFFER_INCLUDE,
-      });
-    }
-    if (rotate) {
-      await this.activityLog.record(user, ACTIVITY_ACTIONS.PORTAL_LINK_ROTATED, 'Application', offer.applicationId, {
-        candidate: offer.application.candidate.name,
-        portal: 'offer',
-      });
-    }
-    return { token: offer.portalToken };
-  }
-
   /** 录入候选人答复（HR 代录，如电话确认）。拒绝必选原因码。 */
   async respond(id: string, dto: RespondDto, user: JwtUser) {
-    const { offer } = await this.applyDecision(id, dto.decision, dto.reason, user);
+    const current = await this.findOrThrow(id);
+    this.assertDepartment(user, current.application.job.departmentId);
+    const offer = await this.applyDecision(id, dto.decision, dto.reason, user);
     return this.present(offer, user);
   }
 
-  // ---------- 候选人免登录门户（H5 查看与答复） ----------
+  // ---------- 候选人页 ----------
 
-  /** 候选人视角的 Offer 内容（链接即凭证；发送前不暴露薪资细节） */
-  async portalView(token: string) {
-    let offer = await this.prisma.offer.findUnique({
-      where: { portalToken: token },
-      include: OFFER_INCLUDE,
-    });
-    if (!offer) throw portalLinkInvalid();
-    assertPortalLive(offer.portalExpiresAt);
+  /** 候选人页上的 Offer 部分（链接即凭证；未发出时不展示薪资） */
+  async portalSection(applicationId: string) {
+    let offer = await this.prisma.offer.findUnique({ where: { applicationId }, include: OFFER_INCLUDE });
+    if (!offer) return null;
     offer = await this.expireIfDue(offer);
-
-    const readable = offer.approvalStatus === 'SENT' || offer.approvalStatus === 'EXPIRED';
     const base = {
-      company: 'ART 科技有限公司',
-      // 候选人页面上的「联系 HR」要能真的联系到人：给出对接 HR 的姓名与邮箱
-      hrContact: await this.hrContactFor(offer.applicationId),
-      candidateName: offer.application.candidate.name,
-      jobTitle: offer.application.job.title,
-      department: offer.application.job.department.name,
-      status: offer.approvalStatus,
+      status: offer.status,
       decision: offer.decision,
       decisionReason: offer.decisionReason,
       respondedAt: offer.respondedAt,
       declineReasons: OFFER_DECLINE_REASONS,
     };
-    if (!readable) {
-      // 议价/重提中：老链接不展示已撤回的薪资方案
-      return { ...base, preparing: true as const };
-    }
-    let onboardingPortalToken: string | null = null;
-    if (offer.decision === 'ACCEPTED') {
-      onboardingPortalToken = await this.onboarding.portalTokenOf(offer.applicationId);
-    }
+    if (offer.status === 'DRAFT') return { ...base, preparing: true as const };
     return {
       ...base,
       preparing: false as const,
@@ -375,29 +241,44 @@ export class OffersService {
       sentAt: offer.sentAt,
       expiresAt: offer.expiresAt,
       extendedOnce: offer.extendedOnce,
-      onboardingPortalToken,
     };
   }
 
-  /** 候选人在门户上接受/拒绝 Offer（拒绝必选原因码） */
-  async portalRespond(token: string, dto: RespondDto) {
-    const offer = await this.prisma.offer.findUnique({
-      where: { portalToken: token },
-      select: { id: true, portalExpiresAt: true, application: { select: { candidate: { select: { name: true } } } } },
+  /** 候选人在候选人页接受 / 拒绝 Offer */
+  async portalRespond(applicationId: string, candidateName: string, dto: RespondDto) {
+    const offer = await this.prisma.offer.findUnique({ where: { applicationId }, select: { id: true } });
+    if (!offer) throw new BadRequestException('还没有收到 Offer');
+    await this.applyDecision(offer.id, dto.decision, dto.reason, candidateActor(candidateName));
+  }
+
+  /** 候选人的对接 HR：最近一次发出该 Offer 的人；查不到（如旧数据）时取任一在职 HR */
+  async hrContactFor(applicationId: string): Promise<{ name: string; email: string } | null> {
+    const log = await this.prisma.activityLog.findFirst({
+      where: {
+        entityType: 'Application',
+        entityId: applicationId,
+        action: { in: [ACTIVITY_ACTIONS.OFFER_SENT, ACTIVITY_ACTIONS.INTERVIEW_SCHEDULED] },
+        actorId: { not: null },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { actor: { select: { name: true, email: true, status: true } } },
     });
-    if (!offer) throw portalLinkInvalid();
-    assertPortalLive(offer.portalExpiresAt);
-    const actor = candidateActor(offer.application.candidate.name);
-    await this.applyDecision(offer.id, dto.decision, dto.reason, actor);
-    return this.portalView(token);
+    if (log?.actor && log.actor.status === 'ACTIVE') return { name: log.actor.name, email: log.actor.email };
+    const hr = await this.prisma.user.findFirst({
+      where: { status: 'ACTIVE', roles: { some: { role: { code: RoleCode.HR } } } },
+      select: { name: true, email: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return hr ? { name: hr.name, email: hr.email } : null;
   }
 
   // ---------- 内部实现 ----------
 
   /**
-   * 答复落库 + 自动化工作流，HR 代录与候选人门户共用：
-   * 接受 → 生成入职单（三方清单 + 新员工门户令牌）+ 卡片自动移入「待入职」+ HC 满编检查；
-   * 拒绝 → 应聘置为 WITHDRAWN（原因码留痕）+ 提示 HR 激活同职位备选候选人。
+   * 答复落库 + 自动化，HR 代录与候选人页共用。核心状态变更在一个事务里：
+   * 接受 → 写答复、创建入职单和合同、卡片移到「入职」、候选人页顺延到入职环节；
+   * 拒绝 → 写答复、应聘置为 WITHDRAWN（原因码留痕）。
+   * 满编检查和通知在事务提交后执行，失败不影响已经落库的答复。
    */
   private async applyDecision(
     offerId: string,
@@ -407,101 +288,95 @@ export class OffersService {
   ) {
     let offer = await this.findOrThrow(offerId);
     offer = await this.expireIfDue(offer);
-    if (offer.approvalStatus === 'EXPIRED') {
+    if (offer.status === 'EXPIRED') {
       throw new BadRequestException('该 Offer 已超过答复期失效，请联系 HR 续期后再答复');
     }
-    if (offer.approvalStatus !== 'SENT') throw new BadRequestException('仅已发送的 Offer 可录入答复');
+    if (offer.status !== 'SENT') throw new BadRequestException('仅已发送的 Offer 可录入答复');
     if (offer.decision) throw new BadRequestException('该 Offer 已有答复');
     if (decision === 'DECLINED' && !reason?.trim()) {
       throw new BadRequestException('拒绝 Offer 必须选择原因码');
     }
 
-    // 并发双答复（如 HR 代录与候选人门户同时提交）只允许一个成功
-    const result = await this.prisma.offer.updateMany({
-      where: { id: offerId, approvalStatus: 'SENT', decision: null },
-      data: {
-        decision,
-        respondedAt: new Date(),
-        decisionReason: decision === 'DECLINED' ? reason : null,
-        // 一次性：答复后链接只保留 14 天（接受者从这里进入入职门户）
-        portalExpiresAt: offer.portalToken ? portalExpiry(PORTAL_TTL.OFFER_AFTER_DECISION_MS) : null,
-      },
-    });
-    if (result.count === 0) throw new ConflictException('该 Offer 刚被答复过，请刷新查看');
-    const updated = await this.findOrThrow(offerId);
-    await this.activityLog.record(actor, ACTIVITY_ACTIONS.OFFER_RESPONDED, 'Application', offer.applicationId, {
-      candidate: offer.application.candidate.name,
-      decision,
-      reason: reason ?? null,
+    const { candidate, job } = offer.application;
+    const onboardingId = await this.prisma.$transaction(async (tx) => {
+      // 并发双答复（如 HR 代录与候选人同时提交）只允许一个成功
+      const result = await tx.offer.updateMany({
+        where: { id: offerId, status: 'SENT', decision: null },
+        data: { decision, respondedAt: new Date(), decisionReason: decision === 'DECLINED' ? reason : null },
+      });
+      if (result.count === 0) throw new ConflictException('该 Offer 刚被答复过，请刷新查看');
+      await this.activityLog.record(
+        actor,
+        ACTIVITY_ACTIONS.OFFER_RESPONDED,
+        'Application',
+        offer.applicationId,
+        { candidate: candidate.name, decision, reason: reason ?? null },
+        tx,
+      );
+      if (decision === 'ACCEPTED') {
+        const onboarding = await this.onboarding.createForApplication(offer.applicationId, actor, tx);
+        await this.applications.moveToStageKind(offer.applicationId, StageKind.ONBOARDING, actor, tx);
+        await ensurePortalLink(tx, offer.applicationId, portalExpiry(PORTAL_TTL.ONBOARDING_MS));
+        return onboarding.id;
+      }
+      await tx.application.update({
+        where: { id: offer.applicationId },
+        data: { status: 'WITHDRAWN', rejectReason: reason, version: { increment: 1 } },
+      });
+      await this.activityLog.record(
+        actor,
+        ACTIVITY_ACTIONS.APPLICATION_WITHDRAWN,
+        'Application',
+        offer.applicationId,
+        { candidate: candidate.name, job: job.title, reason },
+        tx,
+      );
+      return null;
     });
 
-    let onboardingPortalToken: string | null = null;
-    if (decision === 'ACCEPTED') {
-      const onboarding = await this.onboarding.createForApplication(offer.applicationId, actor);
-      onboardingPortalToken = await this.onboarding.ensurePortalToken(onboarding.id, actor);
-      await this.applications.moveToStageByName(offer.applicationId, '待入职', actor);
-      await this.checkHeadcount(offer.application.job.id, actor);
+    if (onboardingId) {
+      await this.checkHeadcount(job.id, actor);
+      const link = `/onboarding?onboarding=${onboardingId}`;
       await this.notifications.pushByPermission(
-        PERMISSIONS.OFFER_INITIATE,
-        offer.application.job.departmentId,
-        `Offer 已接受：${offer.application.candidate.name}`,
-        `${offer.application.job.title} · 入职单已自动创建，可发送资料收集链接`,
-        `/onboarding?onboarding=${onboarding.id}`,
-      );
-      // IT 要提前备电脑、开账号；用人经理要准备带教——都不该等到入职当天才知道
-      await this.notifications.pushToRole(
-        RoleCode.IT_SUPPORT,
-        `新员工待入职：${offer.application.candidate.name}`,
-        `${offer.application.job.title} · 请准备电脑设备、开通邮箱与 IM 账号`,
-        `/onboarding?onboarding=${onboarding.id}`,
+        PERMISSIONS.ONBOARDING_MANAGE,
+        job.departmentId,
+        `Offer 已接受：${candidate.name}`,
+        `${job.title} · 入职单和劳动合同已自动生成，候选人可在同一个链接里填写入职信息`,
+        link,
       );
       await this.notifications.push(
-        await this.notifications.jobManagerIds(offer.application.job.id),
-        `Offer 已接受：${offer.application.candidate.name}`,
-        `${offer.application.job.title} · 候选人已接受 Offer，进入入职流程`,
-        `/onboarding?onboarding=${onboarding.id}`,
+        await this.notifications.jobManagerIds(job.id),
+        `Offer 已接受：${candidate.name}`,
+        `${job.title} · 候选人已接受 Offer，进入入职流程`,
+        link,
       );
     } else {
-      await this.prisma.application.update({
-        where: { id: offer.applicationId },
-        data: { status: 'WITHDRAWN', rejectReason: reason },
-      });
-      await this.activityLog.record(actor, ACTIVITY_ACTIONS.APPLICATION_WITHDRAWN, 'Application', offer.applicationId, {
-        candidate: offer.application.candidate.name,
-        job: offer.application.job.title,
-        reason,
-      });
-      // 竞态止损：提示激活同职位仍在流程中的备选候选人
+      // 提示激活同职位仍在流程中的备选候选人
       const alternatives = await this.prisma.application.count({
-        where: { jobId: offer.application.job.id, status: 'ACTIVE', id: { not: offer.applicationId } },
+        where: { jobId: job.id, status: 'ACTIVE', id: { not: offer.applicationId } },
       });
       await this.notifications.pushByPermission(
         PERMISSIONS.OFFER_INITIATE,
-        offer.application.job.departmentId,
-        `Offer 被拒绝：${offer.application.candidate.name}（${reason}）`,
+        job.departmentId,
+        `Offer 被拒绝：${candidate.name}（${reason}）`,
         alternatives > 0
-          ? `${offer.application.job.title} · 该职位仍有 ${alternatives} 位流程中候选人，建议激活备选`
-          : `${offer.application.job.title} · 该职位暂无其他流程中候选人，建议补充招聘`,
+          ? `${job.title} · 该职位仍有 ${alternatives} 位流程中候选人，建议激活备选`
+          : `${job.title} · 该职位暂无其他流程中候选人，建议补充招聘`,
         `/offers?focus=${offer.id}`,
       );
     }
-    return { offer: updated, onboardingPortalToken };
+    return this.findOrThrow(offerId);
   }
 
-  /** 懒过期：SENT + 未答复 + 已过截止 → EXPIRED，通知 HR（状态迁移一次性，通知不会重复） */
-  private async expireIfDue(offer: OfferWithRelations): Promise<OfferWithRelations> {
-    if (
-      offer.approvalStatus !== 'SENT' ||
-      offer.decision !== null ||
-      !offer.expiresAt ||
-      offer.expiresAt.getTime() > Date.now()
-    ) {
+  /** 到期失效：SENT + 未答复 + 已过截止 → EXPIRED，通知 HR（状态迁移一次性，通知不会重复） */
+  async expireIfDue(offer: OfferWithRelations): Promise<OfferWithRelations> {
+    if (offer.status !== 'SENT' || offer.decision !== null || !offer.expiresAt || offer.expiresAt.getTime() > Date.now()) {
       return offer;
     }
-    // 状态前置条件进写入条件：并发懒扫描（如两个 HR 前后脚打开列表页）只会有一个真正执行失效副作用
+    // 状态前置条件进写入条件：并发扫描只会有一个真正执行失效副作用
     const result = await this.prisma.offer.updateMany({
-      where: { id: offer.id, approvalStatus: 'SENT', decision: null },
-      data: { approvalStatus: 'EXPIRED' },
+      where: { id: offer.id, status: 'SENT', decision: null },
+      data: { status: 'EXPIRED' },
     });
     if (result.count === 0) return this.findOrThrow(offer.id);
     await this.activityLog.record(null, ACTIVITY_ACTIONS.OFFER_EXPIRED, 'Application', offer.applicationId, {
@@ -515,10 +390,34 @@ export class OffersService {
       `${offer.application.job.title} · 超过答复期未答复${offer.extendedOnce ? '（已用过续期）' : '，可续期一次'}`,
       `/offers?focus=${offer.id}`,
     );
-    return { ...offer, approvalStatus: 'EXPIRED' };
+    return { ...offer, status: 'EXPIRED' };
   }
 
-  /** HC 满编自动暂停职位，并通知 HR 与职位负责人（未设用人经理时按审批人兜底） */
+  /** 定时任务：把所有到期未答复的 Offer 置为失效 */
+  async expireDueOffers(): Promise<number> {
+    const due = await this.prisma.offer.findMany({
+      where: { status: 'SENT', decision: null, expiresAt: { lte: new Date() } },
+      include: OFFER_INCLUDE,
+    });
+    for (const offer of due) await this.expireIfDue(offer);
+    return due.length;
+  }
+
+  private async findOrThrow(id: string): Promise<OfferWithRelations> {
+    const offer = await this.prisma.offer.findUnique({ where: { id }, include: OFFER_INCLUDE });
+    if (!offer) throw new NotFoundException('Offer 不存在');
+    return offer;
+  }
+
+  /** 数据行级权限：部门范围的账号只能操作本部门职位的 Offer */
+  private assertDepartment(user: JwtUser, departmentId: string) {
+    const deptScope = departmentScopeOf(user);
+    if (deptScope && !inDepartmentScope(deptScope, departmentId)) {
+      throw new ForbiddenException('仅可操作本部门职位的 Offer（数据范围：本部门）');
+    }
+  }
+
+  /** HC 满编自动暂停职位，并通知 HR 与职位负责人 */
   private async checkHeadcount(jobId: string, user: JwtUser) {
     const job = await this.prisma.job.findUniqueOrThrow({ where: { id: jobId } });
     if (job.status !== 'OPEN') return;
@@ -533,17 +432,14 @@ export class OffersService {
     await this.activityLog.recordAuto(user, ACTIVITY_ACTIONS.JOB_UPDATED, 'Job', jobId, {
       reason: `HC 已满（${used}/${job.headcount}），职位自动暂停`,
     });
+    const recipients = [
+      ...(await this.notifications.jobManagerIds(jobId)),
+      ...(await this.notifications.recipientsByPermission(PERMISSIONS.OFFER_INITIATE, job.departmentId)),
+    ];
     await this.notifications.push(
-      await this.notifications.jobManagerIds(jobId),
+      recipients,
       `职位已满编自动暂停：${job.title}`,
-      `HC ${used}/${job.headcount}，如需继续招聘请申请增编`,
-      `/jobs?q=${encodeURIComponent(job.title)}`,
-    );
-    await this.notifications.pushByPermission(
-      PERMISSIONS.OFFER_INITIATE,
-      job.departmentId,
-      `职位已满编自动暂停：${job.title}`,
-      `HC ${used}/${job.headcount}`,
+      `HC ${used}/${job.headcount}，如需继续招聘请调整编制`,
       `/jobs?q=${encodeURIComponent(job.title)}`,
     );
   }
@@ -557,63 +453,5 @@ export class OffersService {
     }
     return date;
   }
-
-  /** AI 留存预测（辅助参考） */
-  async retention(id: string, user: JwtUser) {
-    this.ensureCanRead(user);
-    const offer = await this.prisma.offer.findUnique({
-      where: { id },
-      include: {
-        application: {
-          include: {
-            candidate: { include: { resumes: { orderBy: { createdAt: 'desc' }, take: 1 } } },
-            job: true,
-          },
-        },
-      },
-    });
-    if (!offer) throw new NotFoundException('Offer 不存在');
-    // 数据行级权限：与 list()/approve() 同规则，用人经理仅本部门职位的 Offer
-    const deptScope = departmentScopeOf(user);
-    if (deptScope && !inDepartmentScope(deptScope, offer.application.job.departmentId)) {
-      throw new ForbiddenException('仅可查看本部门职位的 Offer（数据范围：本部门）');
-    }
-    const { candidate, job } = offer.application;
-    const parsed = candidate.resumes[0]?.parsed as { summary?: string } | null;
-    const { data, meta } = await this.ai.predictRetention({
-      candidateName: candidate.name,
-      jobTitle: job.title,
-      tags: candidate.tags,
-      matchScore: offer.application.matchScore,
-      summary: parsed?.summary,
-    });
-    return { ...data, aiMeta: meta };
-  }
-
-  private async findOrThrow(id: string): Promise<OfferWithRelations> {
-    const offer = await this.prisma.offer.findUnique({ where: { id }, include: OFFER_INCLUDE });
-    if (!offer) throw new NotFoundException('Offer 不存在');
-    return offer;
-  }
-
-  /** 候选人的对接 HR：最近一次发起 / 发送该 Offer 的人；查不到（如旧数据）时取任一在职 HR */
-  private async hrContactFor(applicationId: string): Promise<{ name: string; email: string } | null> {
-    const log = await this.prisma.activityLog.findFirst({
-      where: {
-        entityType: 'Application',
-        entityId: applicationId,
-        action: { in: [ACTIVITY_ACTIONS.OFFER_SENT, ACTIVITY_ACTIONS.OFFER_INITIATED] },
-        actorId: { not: null },
-      },
-      orderBy: { createdAt: 'desc' },
-      select: { actor: { select: { name: true, email: true, status: true } } },
-    });
-    if (log?.actor && log.actor.status === 'ACTIVE') return { name: log.actor.name, email: log.actor.email };
-    const hr = await this.prisma.user.findFirst({
-      where: { status: 'ACTIVE', roles: { some: { role: { code: RoleCode.HR } } } },
-      select: { name: true, email: true },
-      orderBy: { createdAt: 'asc' },
-    });
-    return hr ? { name: hr.name, email: hr.email } : null;
-  }
 }
+
