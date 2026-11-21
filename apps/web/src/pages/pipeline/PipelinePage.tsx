@@ -740,14 +740,6 @@ export function PipelinePage() {
           </div>
           <Space size={8}>
             {!canMove && <span className="pipeline-readonly-tip">仅查看</span>}
-            {jobId && (
-              <Button
-                icon={<RobotOutlined />}
-                onClick={() => openCopilot({ context: { type: 'job', id: jobId }, prompt: '这个职位的看板进展如何？' })}
-              >
-                问 Copilot
-              </Button>
-            )}
             {canMove && (
               <Button icon={<CheckSquareOutlined />} onClick={() => setBatchMode(true)}>
                 批量操作

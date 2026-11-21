@@ -237,7 +237,7 @@ export function CandidatesPage() {
         return (
           <span className="u-flex-gap-6">
             <span className="hf-secondary hf-ellipsis">{app.job.title}</span>
-            <span className={stageTagClass(app.stage.name)}>{app.stage.name}</span>
+            <span className={stageTagClass(app.stage.name)} style={{ flexShrink: 0 }}>{app.stage.name}</span>
             {(c.applications?.length ?? 0) > 1 && (
               <span className="hf-faint">+{(c.applications?.length ?? 1) - 1}</span>
             )}
@@ -288,7 +288,7 @@ export function CandidatesPage() {
       ),
     },
   ];
-  const TABLE_X = 1300;
+  const TABLE_X = 1422;
 
   const items = candidatesQuery.data?.items ?? [];
   const total = candidatesQuery.data?.total ?? 0;

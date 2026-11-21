@@ -303,7 +303,7 @@ export class ApplicationsService {
         stage: { id: stage.id, name: stage.name, kind: stage.kind, order: stage.order },
         applications: stage.applications.map(({ interviews, ...card }) => ({
           ...card,
-          interview: interviewTag(interviews),
+          interview: stage.kind === StageKind.INTERVIEW ? interviewTag(interviews) : null,
         })),
       })),
     };

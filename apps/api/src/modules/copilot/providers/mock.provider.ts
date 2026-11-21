@@ -310,9 +310,12 @@ export class MockCopilotProvider implements CopilotProvider {
           } else {
             const stages: Json[] = d.stages ?? [];
             parts.push(`**${d.job?.title}** 招聘漏斗：`);
-            parts.push(stages.map((s) => `- ${s.name}：到达 ${s.reached} 人${s.conversion != null ? `，转化 ${Math.round(s.conversion * 100)}%` : ''}`).join('\n'));
-            const worst = stages.filter((s) => s.conversion != null).sort((a, b) => a.conversion - b.conversion)[0];
-            if (worst) parts.push(`转化最低的一环是「${worst.name}」（${Math.round(worst.conversion * 100)}%），建议优先排查这一段。`);
+            parts.push(stages.map((s, i) => `- ${s.name}：到达 ${s.reached} 人${s.conversion != null ? `，转化 ${Math.round(s.conversion * 100)}%` : i > 0 ? '，转化样本不足' : ''}`).join('\n'));
+            const comparable = stages.filter((s) => typeof s.conversion === 'number');
+            const worst = comparable.sort((a, b) => a.conversion - b.conversion)[0];
+            if (worst && worst.conversion < 1) parts.push(`转化最低的一环是「${worst.name}」（${Math.round(worst.conversion * 100)}%），建议优先排查这一段。`);
+            else if (worst) parts.push('可计算的环节转化率均为 100%，未发现转化短板。');
+            else parts.push('目前没有足够的已完结样本来判断转化短板。');
           }
           break;
         }
