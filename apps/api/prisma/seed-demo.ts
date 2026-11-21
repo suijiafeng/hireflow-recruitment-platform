@@ -945,7 +945,7 @@ async function seedBulkDemo() {
     const name = `${pick(SURNAMES, i * 7)}${pick(GIVEN, i * 3)}`;
     const seq = String(i + 1).padStart(4, '0');
     const skills = pick(SKILL_POOL, i);
-    const appliedDaysAgo = 5 + ((i * 13) % 340); // 铺满一年
+    const appliedDaysAgo = 31 + ((i * 13) % 340); // 铺满一年
     const appliedAt = daysAgo(appliedDaysAgo);
     // 每 11 个留一个没邮箱、每 13 个留一个没电话：列表页的 '-' 分支
     const noEmail = i % 11 === 5;
@@ -974,14 +974,15 @@ async function seedBulkDemo() {
     created += 1;
     if (i >= NO_APPLY_FROM) continue; // 未投递的人才库存量
 
-    const job = pick(bulkJobs, i * 3);
+    const job = pick(bulkJobs, i);
+    const stageIndex = (i + Math.floor(i / bulkJobs.length)) % 3;
     // 已入职不超过该职位 HC：之前「供应链专员」HC 1 却入职 11 人，职位页显示 11 / 1
     const plannedOutcome = pick(OUTCOMES, i);
     const hiredSoFar = hiredByJob.get(job.id) ?? 0;
     const outcome = plannedOutcome === 'HIRED' && hiredSoFar >= job.headcount ? 'ACTIVE' : plannedOutcome;
     if (outcome === 'HIRED') hiredByJob.set(job.id, hiredSoFar + 1);
     // 在途的人停在 筛选 / 面试 / 录用（进入「入职」必须先有已接受的 Offer）
-    const stageKind = outcome === 'HIRED' ? StageKind.ONBOARDING : SYSTEM_STAGE_KINDS[outcome === 'REJECTED' ? (i % 2) + 1 : i % 3];
+    const stageKind = outcome === 'HIRED' ? StageKind.ONBOARDING : SYSTEM_STAGE_KINDS[outcome === 'REJECTED' ? (i % 2) + 1 : stageIndex];
     const stage = job.stages.find((s) => s.kind === stageKind) ?? job.stages[0];
     // 每 9 个留一个没有匹配分：列表与卡片的 '—' 分支
     const hasScore = i % 9 !== 4;
@@ -1009,7 +1010,7 @@ async function seedBulkDemo() {
         position: i,
         createdAt: appliedAt,
         // 每 7 个制造一张超时停留卡：看板列头的「N 超时」与卡片红字
-        stageEnteredAt: daysAgo(i % 7 === 3 ? Math.min(appliedDaysAgo, 12) : Math.max(appliedDaysAgo - 5, 0)),
+        stageEnteredAt: daysAgo(i % 7 === 3 ? 12 : i % 4),
       },
     });
 

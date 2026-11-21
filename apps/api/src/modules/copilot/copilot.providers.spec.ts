@@ -197,6 +197,34 @@ describe('Mock 规则引擎', () => {
     expect(text).not.toContain('<untrusted_');
   });
 
+  it.each([
+    [0, '转化最低的一环是「入职」（0%）'],
+    [1, '可计算的环节转化率均为 100%'],
+    [null, '目前没有足够的已完结样本'],
+  ])('按可计算的样本解释漏斗转化率 %s', async (conversion, expected) => {
+    const events = await collect(mock.stream(request([
+      { role: 'user', content: '哪个阶段的转化率最低？' },
+      {
+        role: 'tool',
+        toolCallId: 'funnel',
+        name: 'funnel_insights',
+        content: JSON.stringify({
+          ok: true,
+          data: {
+            job: { title: '示例职位' },
+            stages: [
+              { name: '录用', reached: 1, conversion: null },
+              { name: '入职', reached: conversion === 1 ? 1 : 0, conversion },
+            ],
+          },
+        }),
+      },
+    ])));
+    const text = events.map((event) => event.type === 'text' ? event.delta : '').join('');
+    expect(text).toContain(expected);
+    if (conversion !== 0) expect(text).not.toContain('建议优先排查');
+  });
+
   it('流式输出遵守中止信号', async () => {
     const slow = new MockCopilotProvider(20);
     const ctrl = new AbortController();

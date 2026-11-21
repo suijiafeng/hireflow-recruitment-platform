@@ -240,7 +240,7 @@ export function MainLayout() {
               <Space size={8} className="header-user">
                 <Avatar size="small" className="header-avatar" icon={<UserOutlined />} />
                 <Typography.Text>{user?.name}</Typography.Text>
-                {primaryRole && ROLE_LABEL[primaryRole] && (
+                {primaryRole && ROLE_LABEL[primaryRole] && ROLE_LABEL[primaryRole] !== user?.name && (
                   <Tag className="u-mr-0">
                     {ROLE_LABEL[primaryRole]}
                   </Tag>
